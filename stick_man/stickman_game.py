@@ -7,7 +7,7 @@ pygame.init()
 
 # 游戏常量
 SCREEN_WIDTH = 800
-SCREEN_HEIGHT =600
+SCREEN_HEIGHT = 600
 FPS = 60
 GRAVITY = 0.8
 JUMP_POWER = -12
@@ -25,89 +25,184 @@ GRAY = (128, 128, 128)
 DARK_GRAY = (64, 64, 64)
 SKY_BLUE = (135, 206, 235)
 BROWN = (139, 69, 19)
+DARK_GREEN = (0, 100, 0)
 
-class GatlingGun:
-    """加特林机枪类"""
-    def __init__(self):
-        self.shoot_delay = 0
-        self.barrel_angle = 0
-        self.muzzle_flash = 0
-        self.fire_rate = 5  # 每5帧射一发（约12发/秒）
-        self.last_shot = 0
-        
-    def update(self):
-        if self.shoot_delay > 0:
-            self.shoot_delay -= 1
-        if self.muzzle_flash > 0:
-            self.muzzle_flash -= 1
-        # 枪管旋转动画
-        self.barrel_angle = (self.barrel_angle + 15) % 360
-        
-    def can_shoot(self):
-        return self.shoot_delay <= 0
-    
-    def shoot(self):
-        if self.can_shoot():
-            self.shoot_delay = self.fire_rate
-            self.muzzle_flash = 3
-            return True
-        return False
-    
-    def draw(self, screen, x, y, facing_right):
-        """绘制加特林"""
-        if facing_right:
-            # 枪身
-            pygame.draw.rect(screen, DARK_GRAY, (x + 20, y + 25, 30, 8))
-            # 枪管组（6根枪管）
-            for i in range(6):
-                angle_rad = math.radians(self.barrel_angle + i * 60)
-                offset_x = int(math.cos(angle_rad) * 5)
-                offset_y = int(math.sin(angle_rad) * 5)
-                pygame.draw.circle(screen, GRAY, 
-                                 (x + 48 + offset_x, y + 29 + offset_y), 3)
-            # 枪口火焰
-            if self.muzzle_flash > 0:
-                flash_size = random.randint(5, 12)
-                pygame.draw.circle(screen, ORANGE, (x + 50, y + 29), flash_size)
-                pygame.draw.circle(screen, YELLOW, (x + 50, y + 29), flash_size // 2)
-        else:
-            # 向左时的加特林
-            pygame.draw.rect(screen, DARK_GRAY, (x - 10, y + 25, 30, 8))
-            for i in range(6):
-                angle_rad = math.radians(self.barrel_angle + i * 60)
-                offset_x = int(math.cos(angle_rad) * 5)
-                offset_y = int(math.sin(angle_rad) * 5)
-                pygame.draw.circle(screen, GRAY,
-                                 (x - 18 + offset_x, y + 29 + offset_y), 3)
-            if self.muzzle_flash > 0:
-                flash_size = random.randint(5, 12)
-                pygame.draw.circle(screen, ORANGE, (x - 20, y + 29), flash_size)
-                pygame.draw.circle(screen, YELLOW, (x - 20, y + 29), flash_size // 2)
-
-class GatlingBullet:
-    """加特林子弹类"""
+class Rocket:
+    """火箭弹类"""
     def __init__(self, x, y, direction):
         self.x = x
         self.y = y
+        self.start_x = x
+        self.start_y = y
         self.direction = direction
-        self.speed = 15  # 更快的速度
-        self.size = 4    # 更小的子弹
-        self.damage = 8  # 单发伤害较低，但射速快
+        self.speed = 12
+        self.size = 6
+        self.damage = 50
+        self.exploded = False
+        self.explosion_timer = 0
+        self.trail = []  # 尾迹效果
+        self.angle = 0
         
     def update(self):
+        if self.exploded:
+            self.explosion_timer -= 1
+            return
+        
+        # 记录尾迹
+        self.trail.append((self.x, self.y))
+        if len(self.trail) > 10:
+            self.trail.pop(0)
+        
+        # 移动
         self.x += self.direction * self.speed
-        # 子弹轨迹微飘移（加特林特色）
-        self.y += random.uniform(-1, 1)
+        
+        # 计算火箭角度（指向飞行方向）
+        self.angle = 0 if self.direction > 0 else 180
+        
+        # 简单的抛物线效果（略微下坠）
+        self.y += 0.5
+        
+        # 边界检查
+        if self.x < -100 or self.x > SCREEN_WIDTH + 100:
+            self.exploded = True
+            self.explosion_timer = 10
+    
+    def explode(self):
+        """触发爆炸"""
+        if not self.exploded:
+            self.exploded = True
+            self.explosion_timer = 15
+            return True
+        return False
     
     def draw(self, screen, camera_x=0):
         screen_x = self.x - camera_x
-        # 绘制曳光弹效果
-        pygame.draw.circle(screen, YELLOW, (int(screen_x), int(self.y)), self.size)
-        pygame.draw.circle(screen, ORANGE, (int(screen_x), int(self.y)), self.size // 2)
+        
+        if self.exploded:
+            # 绘制爆炸效果
+            if self.explosion_timer > 0:
+                explosion_radius = (15 - self.explosion_timer) * 2
+                pygame.draw.circle(screen, ORANGE, (int(screen_x), int(self.y)), explosion_radius)
+                pygame.draw.circle(screen, RED, (int(screen_x), int(self.y)), explosion_radius // 2)
+                pygame.draw.circle(screen, YELLOW, (int(screen_x), int(self.y)), explosion_radius // 4)
+            return
+        
+        # 绘制尾迹
+        for i, (tx, ty) in enumerate(self.trail):
+            alpha = i / len(self.trail)
+            trail_x = tx - camera_x
+            trail_size = int(3 * alpha)
+            if trail_size > 0:
+                pygame.draw.circle(screen, ORANGE, (int(trail_x), int(ty)), trail_size)
+        
+        # 绘制火箭弹体
+        rocket_points = []
+        if self.direction > 0:
+            # 向右的火箭
+            rocket_points = [
+                (screen_x + self.size, self.y),           # 弹头
+                (screen_x - self.size, self.y - 3),       # 尾翼上
+                (screen_x - self.size, self.y + 3),       # 尾翼下
+                (screen_x - self.size//2, self.y)         # 喷口
+            ]
+        else:
+            # 向左的火箭
+            rocket_points = [
+                (screen_x - self.size, self.y),           # 弹头
+                (screen_x + self.size, self.y - 3),       # 尾翼上
+                (screen_x + self.size, self.y + 3),       # 尾翼下
+                (screen_x + self.size//2, self.y)         # 喷口
+            ]
+        
+        pygame.draw.polygon(screen, DARK_GRAY, rocket_points)
+        # 弹头
+        if self.direction > 0:
+            pygame.draw.circle(screen, RED, (int(screen_x + self.size), int(self.y)), 3)
+        else:
+            pygame.draw.circle(screen, RED, (int(screen_x - self.size), int(self.y)), 3)
+        
+        # 火焰效果
+        flame_size = random.randint(3, 6)
+        if self.direction > 0:
+            pygame.draw.circle(screen, ORANGE, (int(screen_x - self.size), int(self.y)), flame_size)
+        else:
+            pygame.draw.circle(screen, ORANGE, (int(screen_x + self.size), int(self.y)), flame_size)
     
     def get_rect(self):
         return pygame.Rect(self.x - self.size, self.y - self.size, 
                           self.size * 2, self.size * 2)
+    
+    def get_explosion_rect(self):
+        """爆炸范围（用于范围伤害）"""
+        return pygame.Rect(self.x - 50, self.y - 50, 100, 100)
+
+class RPG:
+    """火箭筒类"""
+    def __init__(self):
+        self.reload_time = 0
+        self.max_reload = 40  # 装填时间（帧）
+        self.muzzle_flash = 0
+        self.rockets = []  # 当前场景中的火箭弹
+        
+    def update(self):
+        if self.reload_time > 0:
+            self.reload_time -= 1
+        if self.muzzle_flash > 0:
+            self.muzzle_flash -= 1
+        
+        # 更新所有火箭弹
+        for rocket in self.rockets[:]:
+            rocket.update()
+            if rocket.exploded and rocket.explosion_timer <= 0:
+                self.rockets.remove(rocket)
+    
+    def can_shoot(self):
+        return self.reload_time <= 0
+    
+    def shoot(self, x, y, direction):
+        if self.can_shoot():
+            self.reload_time = self.max_reload
+            self.muzzle_flash = 5
+            rocket = Rocket(x, y, direction)
+            self.rockets.append(rocket)
+            return rocket
+        return None
+    
+    def draw(self, screen, x, y, facing_right, camera_x=0):
+        screen_x = x - camera_x
+        
+        # 火箭筒主体
+        if facing_right:
+            # 炮管
+            pygame.draw.rect(screen, DARK_GREEN, (screen_x + 20, y + 25, 35, 10))
+            # 瞄准镜
+            pygame.draw.rect(screen, GRAY, (screen_x + 45, y + 20, 8, 8))
+            pygame.draw.circle(screen, BLUE, (screen_x + 49, y + 24), 2)
+            # 肩托
+            pygame.draw.rect(screen, BROWN, (screen_x + 10, y + 28, 15, 4))
+            # 握把
+            pygame.draw.rect(screen, DARK_GRAY, (screen_x + 25, y + 35, 6, 8))
+            
+            # 炮口火焰
+            if self.muzzle_flash > 0:
+                flash_size = random.randint(8, 15)
+                pygame.draw.circle(screen, ORANGE, (screen_x + 55, y + 30), flash_size)
+                pygame.draw.circle(screen, YELLOW, (screen_x + 55, y + 30), flash_size // 2)
+                # 烟雾
+                pygame.draw.circle(screen, GRAY, (screen_x + 60, y + 28), flash_size // 2)
+        else:
+            # 向左的火箭筒
+            pygame.draw.rect(screen, DARK_GREEN, (screen_x - 15, y + 25, 35, 10))
+            pygame.draw.rect(screen, GRAY, (screen_x - 13, y + 20, 8, 8))
+            pygame.draw.circle(screen, BLUE, (screen_x - 9, y + 24), 2)
+            pygame.draw.rect(screen, BROWN, (screen_x - 5, y + 28, 15, 4))
+            pygame.draw.rect(screen, DARK_GRAY, (screen_x - 1, y + 35, 6, 8))
+            
+            if self.muzzle_flash > 0:
+                flash_size = random.randint(8, 15)
+                pygame.draw.circle(screen, ORANGE, (screen_x - 15, y + 30), flash_size)
+                pygame.draw.circle(screen, YELLOW, (screen_x - 15, y + 30), flash_size // 2)
+                pygame.draw.circle(screen, GRAY, (screen_x - 20, y + 28), flash_size // 2)
 
 class StickMan:
     def __init__(self, x, y, color=BLACK, is_player=True):
@@ -129,13 +224,11 @@ class StickMan:
         self.width = 30
         self.height = 60
         
-        # 玩家特有的加特林
+        # 玩家特有的火箭筒
         if is_player:
-            self.gatling = GatlingGun()
-            self.bullets = []
+            self.rpg = RPG()
         else:
-            self.gatling = None
-            self.bullets = None
+            self.rpg = None
         
     def update(self, platforms, enemies=None):
         # 应用速度
@@ -181,27 +274,18 @@ class StickMan:
         if self.knockback_timer > 0:
             self.knockback_timer -= 1
         
-        # 更新加特林
-        if self.is_player and self.gatling:
-            self.gatling.update()
-            # 更新子弹
-            for bullet in self.bullets[:]:
-                bullet.update()
-                if bullet.x < -100 or bullet.x > SCREEN_WIDTH + 100:
-                    self.bullets.remove(bullet)
+        # 更新火箭筒
+        if self.is_player and self.rpg:
+            self.rpg.update()
     
-    def shoot_gatling(self):
-        """使用加特林射击"""
-        if self.is_player and self.gatling and self.gatling.can_shoot():
-            if self.gatling.shoot():
-                # 创建子弹
-                bullet_x = self.x + self.width if self.facing_right else self.x
-                bullet_y = self.y + self.height // 2
-                direction = 1 if self.facing_right else -1
-                bullet = GatlingBullet(bullet_x, bullet_y, direction)
-                self.bullets.append(bullet)
-                return True
-        return False
+    def shoot_rpg(self):
+        """发射火箭弹"""
+        if self.is_player and self.rpg:
+            rocket_x = self.x + self.width if self.facing_right else self.x
+            rocket_y = self.y + self.height // 2
+            direction = 1 if self.facing_right else -1
+            return self.rpg.shoot(rocket_x, rocket_y, direction)
+        return None
     
     def jump(self):
         if self.on_ground:
@@ -277,9 +361,9 @@ class StickMan:
             eye_x = head_x - 5
         pygame.draw.circle(screen, BLACK, (eye_x, head_y + 8), 2)
         
-        # 绘制武器（玩家用加特林）
-        if self.is_player and self.gatling:
-            self.gatling.draw(screen, screen_x, self.y, self.facing_right)
+        # 绘制火箭筒（玩家专用）
+        if self.is_player and self.rpg:
+            self.rpg.draw(screen, screen_x, self.y, self.facing_right, camera_x)
         elif self.is_attacking:
             # 敌人的近战武器
             if self.facing_right:
@@ -294,11 +378,6 @@ class StickMan:
         health_percent = self.health / self.max_health
         pygame.draw.rect(screen, RED, (screen_x, self.y - 15, bar_width, bar_height))
         pygame.draw.rect(screen, GREEN, (screen_x, self.y - 15, bar_width * health_percent, bar_height))
-        
-        # 绘制加特林子弹
-        if self.is_player and self.bullets:
-            for bullet in self.bullets:
-                bullet.draw(screen, camera_x)
 
 class Enemy(StickMan):
     def __init__(self, x, y):
@@ -358,7 +437,7 @@ class Platform:
 class Game:
     def __init__(self):
         self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-        pygame.display.set_caption("Stickman Battle - Gatling Gun")
+        pygame.display.set_caption("Stickman Battle - RPG")
         self.clock = pygame.time.Clock()
         self.running = True
         self.font = pygame.font.Font(None, 36)
@@ -374,9 +453,8 @@ class Game:
         self.win = False
         self.score = 0
         self.kill_count = 0
-        self.shoot_hold = False
-        self.shoot_timer = 0
-        self.tutorial_text = "SPACE=Jump  HOLD K=Gatling  J=Melee"
+        self.reload_display = 0
+        self.tutorial_text = "SPACE=Jump  K=Rocket  J=Melee"
         
         # 创建平台
         self.platforms.append(Platform(0, GROUND_Y, SCREEN_WIDTH * 2, 20, DARK_GRAY))
@@ -407,15 +485,8 @@ class Game:
             else:
                 self.player.vel_x *= 0.8
             
-            # 加特林连射（按住K键）
-            if keys[pygame.K_k]:
-                if self.shoot_timer <= 0:
-                    self.player.shoot_gatling()
-                    self.shoot_timer = 3  # 射击间隔（更快的射速）
-                else:
-                    self.shoot_timer -= 1
-            else:
-                self.shoot_timer = 0
+            # 火箭筒（单发，按K键发射）
+            # 在事件循环中处理按键，避免连发
     
     def handle_collisions(self):
         # 玩家近战攻击判定
@@ -430,20 +501,42 @@ class Game:
                         self.score += 100
                         self.kill_count += 1
         
-        # 加特林子弹击中敌人
-        if self.player.bullets:
-            for bullet in self.player.bullets[:]:
+        # 火箭弹碰撞检测
+        if self.player.rpg:
+            for rocket in self.player.rpg.rockets[:]:
+                # 检查与敌人的碰撞
+                hit = False
                 for enemy in self.enemies[:]:
                     enemy_rect = pygame.Rect(enemy.x, enemy.y, enemy.width, enemy.height)
-                    if bullet.get_rect().colliderect(enemy_rect):
-                        enemy.take_damage(bullet.damage, 1 if enemy.x < bullet.x else -1)
-                        if enemy.health <= 0:
-                            self.enemies.remove(enemy)
-                            self.score += 100
-                            self.kill_count += 1
-                        if bullet in self.player.bullets:
-                            self.player.bullets.remove(bullet)
+                    if not rocket.exploded and rocket.get_rect().colliderect(enemy_rect):
+                        rocket.explode()
+                        hit = True
+                        
+                        # 范围伤害（爆炸半径内所有敌人受伤）
+                        explosion_rect = rocket.get_explosion_rect()
+                        for enemy2 in self.enemies[:]:
+                            enemy2_rect = pygame.Rect(enemy2.x, enemy2.y, enemy2.width, enemy2.height)
+                            if explosion_rect.colliderect(enemy2_rect):
+                                enemy2.take_damage(rocket.damage, 1 if enemy2.x < rocket.x else -1)
+                                if enemy2.health <= 0:
+                                    self.enemies.remove(enemy2)
+                                    self.score += 100
+                                    self.kill_count += 1
                         break
+                
+                # 检查与平台的碰撞
+                if not rocket.exploded and not hit:
+                    for platform in self.platforms:
+                        platform_rect = pygame.Rect(platform.x, platform.y, platform.width, platform.height)
+                        if rocket.get_rect().colliderect(platform_rect):
+                            rocket.explode()
+                            break
+                        
+                        # 简化版：检查火箭弹附近是否有平台（爆炸效果）
+                        dist_to_platform = abs(rocket.x - platform.x)
+                        if dist_to_platform < 30 and rocket.y + rocket.size > platform.y and rocket.y - rocket.size < platform.y + platform.height:
+                            rocket.explode()
+                            break
     
     def update(self):
         self.player.update(self.platforms)
@@ -461,6 +554,10 @@ class Game:
         
         if self.player.health <= 0:
             self.game_over = True
+        
+        # 更新装填显示
+        if self.player.rpg:
+            self.reload_display = self.player.rpg.reload_time
     
     def draw(self):
         self.screen.fill(SKY_BLUE)
@@ -482,6 +579,11 @@ class Game:
         # 绘制玩家
         self.player.draw(self.screen, self.camera_x)
         
+        # 绘制火箭弹（独立绘制）
+        if self.player.rpg:
+            for rocket in self.player.rpg.rockets:
+                rocket.draw(self.screen, self.camera_x)
+        
         # UI
         score_text = self.font.render(f"Score: {self.score}", True, BLACK)
         self.screen.blit(score_text, (10, 10))
@@ -492,13 +594,22 @@ class Game:
         kills_text = self.font.render(f"Kills: {self.kill_count}/4", True, BLACK)
         self.screen.blit(kills_text, (10, 90))
         
-        # 弹药显示
-        ammo_text = self.font.render("Gatling: HOLD K", True, BLACK)
-        self.screen.blit(ammo_text, (SCREEN_WIDTH - 180, 10))
+        # 火箭筒装填显示
+        if self.player.rpg:
+            if self.reload_display > 0:
+                reload_text = self.font.render(f"Reloading: {self.reload_display//6 + 1}", True, RED)
+                self.screen.blit(reload_text, (SCREEN_WIDTH - 150, 10))
+                # 装填进度条
+                reload_percent = 1 - (self.reload_display / self.player.rpg.max_reload)
+                pygame.draw.rect(self.screen, RED, (SCREEN_WIDTH - 150, 35, 100, 10))
+                pygame.draw.rect(self.screen, GREEN, (SCREEN_WIDTH - 150, 35, 100 * reload_percent, 10))
+            else:
+                ready_text = self.font.render("READY", True, GREEN)
+                self.screen.blit(ready_text, (SCREEN_WIDTH - 150, 10))
         
         if self.kill_count == 0:
             tutorial = self.font.render(self.tutorial_text, True, BLACK)
-            self.screen.blit(tutorial, (SCREEN_WIDTH // 2 - 250, 20))
+            self.screen.blit(tutorial, (SCREEN_WIDTH // 2 - 200, 20))
         
         # 游戏结束/胜利画面
         if self.game_over:
@@ -546,6 +657,10 @@ class Game:
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_SPACE and not self.game_over and not self.win:
                         self.player.jump()
+                    
+                    elif event.key == pygame.K_k and not self.game_over and not self.win:
+                        # 发射火箭弹
+                        self.player.shoot_rpg()
                     
                     elif event.key == pygame.K_j and not self.game_over and not self.win:
                         self.player.attack()

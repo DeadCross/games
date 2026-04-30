@@ -32,6 +32,7 @@ class StickMan:
         self.y = y
         self.vel_x = 0
         self.vel_y = 0
+        self.speed = 5  # 添加移动速度属性
         self.on_ground = True
         self.facing_right = True
         self.health = 100 if is_player else 50
@@ -183,7 +184,7 @@ class StickMan:
 class Enemy(StickMan):
     def __init__(self, x, y):
         super().__init__(x, y, RED, False)
-        self.speed = 2
+        self.speed = 2  # 敌人速度
         self.patrol_left = x - 100
         self.patrol_right = x + 100
         self.ai_timer = 0

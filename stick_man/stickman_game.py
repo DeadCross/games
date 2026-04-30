@@ -7,7 +7,7 @@ pygame.init()
 
 # 游戏常量
 SCREEN_WIDTH = 800
-SCREEN_HEIGHT = 600
+SCREEN_HEIGHT =600
 FPS = 60
 GRAVITY = 0.8
 JUMP_POWER = -12
@@ -26,13 +26,96 @@ DARK_GRAY = (64, 64, 64)
 SKY_BLUE = (135, 206, 235)
 BROWN = (139, 69, 19)
 
+class GatlingGun:
+    """加特林机枪类"""
+    def __init__(self):
+        self.shoot_delay = 0
+        self.barrel_angle = 0
+        self.muzzle_flash = 0
+        self.fire_rate = 5  # 每5帧射一发（约12发/秒）
+        self.last_shot = 0
+        
+    def update(self):
+        if self.shoot_delay > 0:
+            self.shoot_delay -= 1
+        if self.muzzle_flash > 0:
+            self.muzzle_flash -= 1
+        # 枪管旋转动画
+        self.barrel_angle = (self.barrel_angle + 15) % 360
+        
+    def can_shoot(self):
+        return self.shoot_delay <= 0
+    
+    def shoot(self):
+        if self.can_shoot():
+            self.shoot_delay = self.fire_rate
+            self.muzzle_flash = 3
+            return True
+        return False
+    
+    def draw(self, screen, x, y, facing_right):
+        """绘制加特林"""
+        if facing_right:
+            # 枪身
+            pygame.draw.rect(screen, DARK_GRAY, (x + 20, y + 25, 30, 8))
+            # 枪管组（6根枪管）
+            for i in range(6):
+                angle_rad = math.radians(self.barrel_angle + i * 60)
+                offset_x = int(math.cos(angle_rad) * 5)
+                offset_y = int(math.sin(angle_rad) * 5)
+                pygame.draw.circle(screen, GRAY, 
+                                 (x + 48 + offset_x, y + 29 + offset_y), 3)
+            # 枪口火焰
+            if self.muzzle_flash > 0:
+                flash_size = random.randint(5, 12)
+                pygame.draw.circle(screen, ORANGE, (x + 50, y + 29), flash_size)
+                pygame.draw.circle(screen, YELLOW, (x + 50, y + 29), flash_size // 2)
+        else:
+            # 向左时的加特林
+            pygame.draw.rect(screen, DARK_GRAY, (x - 10, y + 25, 30, 8))
+            for i in range(6):
+                angle_rad = math.radians(self.barrel_angle + i * 60)
+                offset_x = int(math.cos(angle_rad) * 5)
+                offset_y = int(math.sin(angle_rad) * 5)
+                pygame.draw.circle(screen, GRAY,
+                                 (x - 18 + offset_x, y + 29 + offset_y), 3)
+            if self.muzzle_flash > 0:
+                flash_size = random.randint(5, 12)
+                pygame.draw.circle(screen, ORANGE, (x - 20, y + 29), flash_size)
+                pygame.draw.circle(screen, YELLOW, (x - 20, y + 29), flash_size // 2)
+
+class GatlingBullet:
+    """加特林子弹类"""
+    def __init__(self, x, y, direction):
+        self.x = x
+        self.y = y
+        self.direction = direction
+        self.speed = 15  # 更快的速度
+        self.size = 4    # 更小的子弹
+        self.damage = 8  # 单发伤害较低，但射速快
+        
+    def update(self):
+        self.x += self.direction * self.speed
+        # 子弹轨迹微飘移（加特林特色）
+        self.y += random.uniform(-1, 1)
+    
+    def draw(self, screen, camera_x=0):
+        screen_x = self.x - camera_x
+        # 绘制曳光弹效果
+        pygame.draw.circle(screen, YELLOW, (int(screen_x), int(self.y)), self.size)
+        pygame.draw.circle(screen, ORANGE, (int(screen_x), int(self.y)), self.size // 2)
+    
+    def get_rect(self):
+        return pygame.Rect(self.x - self.size, self.y - self.size, 
+                          self.size * 2, self.size * 2)
+
 class StickMan:
     def __init__(self, x, y, color=BLACK, is_player=True):
         self.x = x
         self.y = y
         self.vel_x = 0
         self.vel_y = 0
-        self.speed = 5  # 添加移动速度属性
+        self.speed = 5
         self.on_ground = True
         self.facing_right = True
         self.health = 100 if is_player else 50
@@ -45,6 +128,14 @@ class StickMan:
         self.knockback_timer = 0
         self.width = 30
         self.height = 60
+        
+        # 玩家特有的加特林
+        if is_player:
+            self.gatling = GatlingGun()
+            self.bullets = []
+        else:
+            self.gatling = None
+            self.bullets = None
         
     def update(self, platforms, enemies=None):
         # 应用速度
@@ -89,6 +180,28 @@ class StickMan:
         # 更新击退计时
         if self.knockback_timer > 0:
             self.knockback_timer -= 1
+        
+        # 更新加特林
+        if self.is_player and self.gatling:
+            self.gatling.update()
+            # 更新子弹
+            for bullet in self.bullets[:]:
+                bullet.update()
+                if bullet.x < -100 or bullet.x > SCREEN_WIDTH + 100:
+                    self.bullets.remove(bullet)
+    
+    def shoot_gatling(self):
+        """使用加特林射击"""
+        if self.is_player and self.gatling and self.gatling.can_shoot():
+            if self.gatling.shoot():
+                # 创建子弹
+                bullet_x = self.x + self.width if self.facing_right else self.x
+                bullet_y = self.y + self.height // 2
+                direction = 1 if self.facing_right else -1
+                bullet = GatlingBullet(bullet_x, bullet_y, direction)
+                self.bullets.append(bullet)
+                return True
+        return False
     
     def jump(self):
         if self.on_ground:
@@ -107,14 +220,12 @@ class StickMan:
         if self.knockback_timer <= 0:
             self.health -= damage
             self.knockback_timer = 20
-            # 击退效果
             self.vel_x = knockback_dir * 8
             self.vel_y = -5
             return True
         return False
     
     def get_attack_rect(self):
-        """获取攻击判定区域"""
         if self.facing_right:
             return pygame.Rect(self.x + self.width, self.y + 20, 40, 40)
         else:
@@ -129,7 +240,7 @@ class StickMan:
         body_top = (head_x, self.y + 20)
         body_bottom = (head_x, self.y + 50)
         
-        # 手臂坐标（根据攻击状态）
+        # 手臂坐标
         if self.is_attacking:
             if self.facing_right:
                 left_arm = (head_x - 10, self.y + 30)
@@ -141,7 +252,7 @@ class StickMan:
             left_arm = (head_x - 15, self.y + 30)
             right_arm = (head_x + 15, self.y + 30)
         
-        # 腿部坐标（根据移动状态）
+        # 腿部坐标
         if abs(self.vel_x) > 1 and self.on_ground:
             leg_offset = 5 * math.sin(pygame.time.get_ticks() * 0.01)
             left_leg = (head_x - 10, self.y + 60 + leg_offset)
@@ -166,8 +277,11 @@ class StickMan:
             eye_x = head_x - 5
         pygame.draw.circle(screen, BLACK, (eye_x, head_y + 8), 2)
         
-        # 绘制武器（如果正在攻击）
-        if self.is_attacking:
+        # 绘制武器（玩家用加特林）
+        if self.is_player and self.gatling:
+            self.gatling.draw(screen, screen_x, self.y, self.facing_right)
+        elif self.is_attacking:
+            # 敌人的近战武器
             if self.facing_right:
                 weapon_end = (head_x + 50, self.y + 25)
             else:
@@ -180,20 +294,23 @@ class StickMan:
         health_percent = self.health / self.max_health
         pygame.draw.rect(screen, RED, (screen_x, self.y - 15, bar_width, bar_height))
         pygame.draw.rect(screen, GREEN, (screen_x, self.y - 15, bar_width * health_percent, bar_height))
+        
+        # 绘制加特林子弹
+        if self.is_player and self.bullets:
+            for bullet in self.bullets:
+                bullet.draw(screen, camera_x)
 
 class Enemy(StickMan):
     def __init__(self, x, y):
         super().__init__(x, y, RED, False)
-        self.speed = 2  # 敌人速度
+        self.speed = 2
         self.patrol_left = x - 100
         self.patrol_right = x + 100
         self.ai_timer = 0
     
     def update_ai(self, player, platforms):
-        # 检测与玩家的距离
         distance = player.x - self.x
         
-        # 追击玩家
         if abs(distance) < 200 and not self.knockback_timer:
             if distance > 0:
                 self.vel_x = self.speed
@@ -202,18 +319,15 @@ class Enemy(StickMan):
                 self.vel_x = -self.speed
                 self.facing_right = False
             
-            # 攻击
             if abs(distance) < 50 and self.attack_cooldown <= 0:
                 self.attack()
         else:
-            # 巡逻
             if self.ai_timer <= 0:
                 self.vel_x = random.choice([-self.speed, self.speed])
                 self.ai_timer = random.randint(60, 180)
             else:
                 self.ai_timer -= 1
             
-            # 边界检查
             if self.x < self.patrol_left:
                 self.vel_x = self.speed
                 self.facing_right = True
@@ -223,7 +337,6 @@ class Enemy(StickMan):
         
         super().update(platforms)
         
-        # 攻击判定
         if self.is_attacking and self.attack_timer == 5:
             attack_rect = self.get_attack_rect()
             player_rect = pygame.Rect(player.x, player.y, player.width, player.height)
@@ -242,29 +355,10 @@ class Platform:
         screen_x = self.x - camera_x
         pygame.draw.rect(screen, self.color, (screen_x, self.y, self.width, self.height))
 
-class Projectile:
-    def __init__(self, x, y, direction):
-        self.x = x
-        self.y = y
-        self.direction = direction
-        self.speed = 10
-        self.size = 8
-    
-    def update(self):
-        self.x += self.direction * self.speed
-    
-    def draw(self, screen, camera_x=0):
-        screen_x = self.x - camera_x
-        pygame.draw.circle(screen, YELLOW, (int(screen_x), int(self.y)), self.size)
-    
-    def get_rect(self):
-        return pygame.Rect(self.x - self.size, self.y - self.size, 
-                          self.size * 2, self.size * 2)
-
 class Game:
     def __init__(self):
         self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-        pygame.display.set_caption("Stickman Battle")
+        pygame.display.set_caption("Stickman Battle - Gatling Gun")
         self.clock = pygame.time.Clock()
         self.running = True
         self.font = pygame.font.Font(None, 36)
@@ -275,13 +369,14 @@ class Game:
         self.player = StickMan(100, GROUND_Y - 60)
         self.enemies = []
         self.platforms = []
-        self.projectiles = []
         self.camera_x = 0
         self.game_over = False
         self.win = False
         self.score = 0
         self.kill_count = 0
-        self.tutorial_text = "Press SPACE to jump, J to attack"
+        self.shoot_hold = False
+        self.shoot_timer = 0
+        self.tutorial_text = "SPACE=Jump  HOLD K=Gatling  J=Melee"
         
         # 创建平台
         self.platforms.append(Platform(0, GROUND_Y, SCREEN_WIDTH * 2, 20, DARK_GRAY))
@@ -310,10 +405,20 @@ class Game:
                 self.player.vel_x = self.player.speed
                 self.player.facing_right = True
             else:
-                self.player.vel_x *= 0.8  # 摩擦力
+                self.player.vel_x *= 0.8
+            
+            # 加特林连射（按住K键）
+            if keys[pygame.K_k]:
+                if self.shoot_timer <= 0:
+                    self.player.shoot_gatling()
+                    self.shoot_timer = 3  # 射击间隔（更快的射速）
+                else:
+                    self.shoot_timer -= 1
+            else:
+                self.shoot_timer = 0
     
     def handle_collisions(self):
-        # 玩家攻击判定
+        # 玩家近战攻击判定
         if self.player.is_attacking and self.player.attack_timer == 5:
             attack_rect = self.player.get_attack_rect()
             for enemy in self.enemies[:]:
@@ -325,50 +430,39 @@ class Game:
                         self.score += 100
                         self.kill_count += 1
         
-        # 远程攻击（魔法弹）
-        for projectile in self.projectiles[:]:
-            projectile.update()
-            if projectile.x < 0 or projectile.x > SCREEN_WIDTH * 2:
-                self.projectiles.remove(projectile)
-                continue
-            
-            # 击中敌人
-            for enemy in self.enemies[:]:
-                if projectile.get_rect().colliderect(pygame.Rect(enemy.x, enemy.y, enemy.width, enemy.height)):
-                    enemy.take_damage(15, 1 if enemy.x < projectile.x else -1)
-                    if enemy.health <= 0:
-                        self.enemies.remove(enemy)
-                        self.score += 100
-                        self.kill_count += 1
-                    if projectile in self.projectiles:
-                        self.projectiles.remove(projectile)
-                    break
+        # 加特林子弹击中敌人
+        if self.player.bullets:
+            for bullet in self.player.bullets[:]:
+                for enemy in self.enemies[:]:
+                    enemy_rect = pygame.Rect(enemy.x, enemy.y, enemy.width, enemy.height)
+                    if bullet.get_rect().colliderect(enemy_rect):
+                        enemy.take_damage(bullet.damage, 1 if enemy.x < bullet.x else -1)
+                        if enemy.health <= 0:
+                            self.enemies.remove(enemy)
+                            self.score += 100
+                            self.kill_count += 1
+                        if bullet in self.player.bullets:
+                            self.player.bullets.remove(bullet)
+                        break
     
     def update(self):
-        # 更新玩家
         self.player.update(self.platforms)
         
-        # 更新敌人AI
         for enemy in self.enemies:
             enemy.update_ai(self.player, self.platforms)
         
-        # 处理碰撞
         self.handle_collisions()
         
-        # 相机跟随
         self.camera_x = self.player.x - SCREEN_WIDTH // 2 + self.player.width // 2
         self.camera_x = max(0, min(self.camera_x, SCREEN_WIDTH * 2 - SCREEN_WIDTH))
         
-        # 检查胜利条件
         if self.kill_count >= 4:
             self.win = True
         
-        # 检查游戏结束
         if self.player.health <= 0:
             self.game_over = True
     
     def draw(self):
-        # 天空背景
         self.screen.fill(SKY_BLUE)
         
         # 绘制云朵
@@ -388,11 +482,7 @@ class Game:
         # 绘制玩家
         self.player.draw(self.screen, self.camera_x)
         
-        # 绘制远程攻击
-        for projectile in self.projectiles:
-            projectile.draw(self.screen, self.camera_x)
-        
-        # 绘制UI
+        # UI
         score_text = self.font.render(f"Score: {self.score}", True, BLACK)
         self.screen.blit(score_text, (10, 10))
         
@@ -402,12 +492,15 @@ class Game:
         kills_text = self.font.render(f"Kills: {self.kill_count}/4", True, BLACK)
         self.screen.blit(kills_text, (10, 90))
         
-        # 教程
+        # 弹药显示
+        ammo_text = self.font.render("Gatling: HOLD K", True, BLACK)
+        self.screen.blit(ammo_text, (SCREEN_WIDTH - 180, 10))
+        
         if self.kill_count == 0:
             tutorial = self.font.render(self.tutorial_text, True, BLACK)
-            self.screen.blit(tutorial, (SCREEN_WIDTH // 2 - 200, 20))
+            self.screen.blit(tutorial, (SCREEN_WIDTH // 2 - 250, 20))
         
-        # 游戏结束画面
+        # 游戏结束/胜利画面
         if self.game_over:
             overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
             overlay.set_alpha(128)
@@ -426,7 +519,6 @@ class Game:
             restart_rect = restart_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 + 50))
             self.screen.blit(restart_text, restart_rect)
         
-        # 胜利画面
         elif self.win:
             overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
             overlay.set_alpha(128)
@@ -457,16 +549,6 @@ class Game:
                     
                     elif event.key == pygame.K_j and not self.game_over and not self.win:
                         self.player.attack()
-                    
-                    elif event.key == pygame.K_k and not self.game_over and not self.win:
-                        # 远程攻击（魔法弹）
-                        direction = 1 if self.player.facing_right else -1
-                        projectile = Projectile(
-                            self.player.x + self.player.width // 2, 
-                            self.player.y + self.player.height // 2,
-                            direction
-                        )
-                        self.projectiles.append(projectile)
                     
                     elif event.key == pygame.K_r and (self.game_over or self.win):
                         self.init_game()

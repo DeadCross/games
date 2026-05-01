@@ -131,31 +131,33 @@ class StickMan:
         self.height = 60
         self.frozen = False
         self.frozen_timer = 0
+        self.respawn_timer = 0  # 重生计时器
         
         if is_player:
             self.frostmourne = Frostmourne()
             self.ice_shards = []
         
     def update(self, platforms):
+        # 重生逻辑
+        if self.respawn_timer > 0:
+            self.respawn_timer -= 1
+            if self.respawn_timer <= 0:
+                self.respawn()
+            return
+        
         # 冰冻效果
         if self.frozen:
             self.frozen_timer -= 1
             if self.frozen_timer <= 0:
                 self.frozen = False
-                # 解除冰冻后恢复正常颜色
             if not self.is_player:
-                # 冰冻时不能移动
                 self.vel_x = 0
                 self.vel_y = 0
                 return
         
         # 飞行控制
         if self.flying:
-            # 飞行时重力减小
             self.vel_y += GRAVITY * 0.3
-            # 飞行时速度更快
-            if abs(self.vel_x) < self.speed * 1.5:
-                pass
         else:
             self.vel_y += GRAVITY
         
@@ -192,7 +194,10 @@ class StickMan:
             self.y = 0
             self.vel_y = 0
         if self.y + self.height > SCREEN_HEIGHT:
-            self.health = 0
+            if self.is_player:
+                self.start_respawn()  # 玩家掉落死亡后重生
+            else:
+                self.health = 0
         
         # 更新攻击计时
         if self.attack_cooldown > 0:
@@ -211,9 +216,35 @@ class StickMan:
                 if not shard.update():
                     self.ice_shards.remove(shard)
     
+    def start_respawn(self):
+        """开始重生倒计时"""
+        self.respawn_timer = 60  # 1秒后重生
+        self.vel_x = 0
+        self.vel_y = 0
+    
+    def respawn(self):
+        """重生"""
+        self.x = 100
+        self.y = GROUND_Y - 60
+        self.vel_x = 0
+        self.vel_y = 0
+        self.health = self.max_health
+        self.frozen = False
+        self.frozen_timer = 0
+        self.is_attacking = False
+        self.attack_timer = 0
+        self.attack_cooldown = 0
+        self.knockback_timer = 0
+        self.on_ground = True
+        self.flying = False
+        self.respawn_timer = 0
+        
+        # 清空冰霜碎片
+        self.ice_shards.clear()
+    
     def fly(self):
         """飞行功能"""
-        if self.can_fly:
+        if self.can_fly and self.respawn_timer == 0:
             self.flying = True
             self.vel_y = -8
             self.on_ground = False
@@ -224,7 +255,6 @@ class StickMan:
     
     def use_frostmourne(self):
         if self.is_player and self.frostmourne.use():
-            # 创建冰霜碎片特效
             for _ in range(30):
                 angle = random.uniform(0, 2 * math.pi)
                 speed = random.uniform(2, 8)
@@ -236,12 +266,13 @@ class StickMan:
         return False
     
     def jump(self):
-        if self.on_ground and not self.frozen:
+        if self.on_ground and not self.frozen and self.respawn_timer == 0:
             self.vel_y = JUMP_POWER
             self.on_ground = False
     
     def attack(self):
-        if self.attack_cooldown <= 0 and not self.is_attacking and not self.frozen:
+        if (self.attack_cooldown <= 0 and not self.is_attacking 
+            and not self.frozen and self.respawn_timer == 0):
             self.is_attacking = True
             self.attack_timer = 10
             self.attack_cooldown = 30
@@ -249,7 +280,7 @@ class StickMan:
         return False
     
     def take_damage(self, damage, knockback_dir):
-        if self.knockback_timer <= 0 and not self.frozen:
+        if self.knockback_timer <= 0 and not self.frozen and self.respawn_timer == 0:
             self.health -= damage
             self.knockback_timer = 20
             self.vel_x = knockback_dir * 8
@@ -274,13 +305,18 @@ class StickMan:
     def draw(self, screen, camera_x=0):
         screen_x = self.x - camera_x
         
+        # 重生闪烁效果
+        if self.respawn_timer > 0:
+            if (self.respawn_timer // 5) % 2 == 0:
+                return  # 闪烁效果：一半时间不显示
+            color = (255, 255, 255)
+        
         # 冰冻效果
         if self.frozen:
             pygame.draw.rect(screen, ICE_BLUE, (screen_x-2, self.y-2, self.width+4, self.height+4), 3)
         
         # 飞行效果（翅膀）
-        if self.flying and not self.frozen:
-            wing_color = (200, 200, 200, 100)
+        if self.flying and not self.frozen and self.respawn_timer == 0:
             if self.facing_right:
                 pygame.draw.ellipse(screen, (200, 200, 200), 
                                   (screen_x-15, self.y+20, 15, 25))
@@ -320,6 +356,8 @@ class StickMan:
         color = self.color if self.knockback_timer <= 0 else RED
         if self.frozen:
             color = ICE_BLUE
+        if self.respawn_timer > 0:
+            color = (200, 200, 200)
         
         pygame.draw.circle(screen, color, (head_x, head_y + 10), 12, 3)
         pygame.draw.line(screen, color, body_top, body_bottom, 3)
@@ -340,12 +378,13 @@ class StickMan:
                 radius = 30 + i * 10
                 pygame.draw.circle(screen, ICE_BLUE, (head_x, head_y + 30), radius, 2)
         
-        # 血条
-        bar_width = 40
-        bar_height = 6
-        health_percent = self.health / self.max_health
-        pygame.draw.rect(screen, RED, (screen_x, self.y - 15, bar_width, bar_height))
-        pygame.draw.rect(screen, GREEN, (screen_x, self.y - 15, bar_width * health_percent, bar_height))
+        # 血条（重生时不显示）
+        if self.respawn_timer == 0:
+            bar_width = 40
+            bar_height = 6
+            health_percent = self.health / self.max_health
+            pygame.draw.rect(screen, RED, (screen_x, self.y - 15, bar_width, bar_height))
+            pygame.draw.rect(screen, GREEN, (screen_x, self.y - 15, bar_width * health_percent, bar_height))
         
         if self.is_player:
             for shard in self.ice_shards:
@@ -358,7 +397,7 @@ class Enemy(StickMan):
         self.ai_timer = 0
     
     def update_ai(self, player, platforms):
-        if self.frozen:
+        if self.frozen or self.respawn_timer > 0:
             super().update(platforms)
             return
         
@@ -408,7 +447,7 @@ class Platform:
 class Game:
     def __init__(self):
         self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-        pygame.display.set_caption("Stickman - Frostmourne (Flying Edition)")
+        pygame.display.set_caption("Stickman - Frostmourne (Auto Respawn)")
         self.clock = pygame.time.Clock()
         self.running = True
         self.font = pygame.font.Font(None, 36)
@@ -421,11 +460,11 @@ class Game:
         self.platforms = []
         self.camera_x = 0
         self.game_over = False
-        self.win = False
         self.score = 0
         self.kill_count = 0
         self.enemy_spawn_timer = 0
-        self.max_enemies = 8  # 最多同时存在8个敌人
+        self.max_enemies = 8
+        self.death_count = 0  # 记录死亡次数
         self.tutorial_text = "F = Freeze | SPACE = Jump/Fly | J = Attack"
         
         # 特效
@@ -456,36 +495,45 @@ class Game:
         frozen_count = 0
         for enemy in self.enemies:
             if not enemy.frozen:
-                # 冰冻敌人，造成少量伤害
                 enemy.take_damage(5, 1 if enemy.x < self.player.x else -1)
-                enemy.freeze(90)  # 冰冻1.5秒
+                enemy.freeze(90)
                 frozen_count += 1
         
-        # 屏幕震动
         self.shake_timer = 8
         self.frost_effect_timer = 15
         
         return frozen_count
     
+    def check_player_death(self):
+        """检查玩家是否死亡"""
+        if self.player.health <= 0 and self.player.respawn_timer == 0:
+            self.death_count += 1
+            self.player.start_respawn()
+            return True
+        return False
+    
     def handle_input(self):
         keys = pygame.key.get_pressed()
         
-        if not self.game_over:
-            # 移动
-            if keys[pygame.K_LEFT] or keys[pygame.K_a]:
-                self.player.vel_x = -self.player.speed
-                self.player.facing_right = False
-            elif keys[pygame.K_RIGHT] or keys[pygame.K_d]:
-                self.player.vel_x = self.player.speed
-                self.player.facing_right = True
-            else:
-                self.player.vel_x *= 0.8
-            
-            # 飞行（按住空格飞行）
-            if keys[pygame.K_SPACE]:
-                self.player.fly()
-            else:
-                self.player.stop_fly()
+        # 玩家重生期间不能移动
+        if self.player.respawn_timer > 0:
+            return
+        
+        # 移动
+        if keys[pygame.K_LEFT] or keys[pygame.K_a]:
+            self.player.vel_x = -self.player.speed
+            self.player.facing_right = False
+        elif keys[pygame.K_RIGHT] or keys[pygame.K_d]:
+            self.player.vel_x = self.player.speed
+            self.player.facing_right = True
+        else:
+            self.player.vel_x *= 0.8
+        
+        # 飞行（按住空格飞行）
+        if keys[pygame.K_SPACE]:
+            self.player.fly()
+        else:
+            self.player.stop_fly()
     
     def handle_collisions(self):
         # 近战攻击
@@ -517,6 +565,7 @@ class Game:
     
     def update(self):
         self.player.update(self.platforms)
+        self.check_player_death()
         
         for enemy in self.enemies:
             enemy.update_ai(self.player, self.platforms)
@@ -532,10 +581,6 @@ class Game:
         if self.enemy_spawn_timer > 60 and len(self.enemies) < self.max_enemies:
             self.enemy_spawn_timer = 0
             self.spawn_enemy()
-        
-        # 检查游戏结束
-        if self.player.health <= 0:
-            self.game_over = True
         
         # 更新特效
         if self.shake_timer > 0:
@@ -582,7 +627,7 @@ class Game:
         score_text = self.font.render(f"Score: {self.score}", True, BLACK)
         self.screen.blit(score_text, (10, 10))
         
-        health_text = self.font.render(f"Health: {self.player.health}", True, BLACK)
+        health_text = self.font.render(f"Health: {max(0, self.player.health)}", True, BLACK)
         self.screen.blit(health_text, (10, 50))
         
         kills_text = self.font.render(f"Kills: {self.kill_count}", True, BLACK)
@@ -590,6 +635,9 @@ class Game:
         
         enemies_text = self.font.render(f"Enemies: {len(self.enemies)}", True, BLACK)
         self.screen.blit(enemies_text, (10, 130))
+        
+        deaths_text = self.font.render(f"Deaths: {self.death_count}", True, BLACK)
+        self.screen.blit(deaths_text, (10, 170))
         
         # 飞行提示
         fly_text = self.font.render("HOLD SPACE = FLY", True, DARK_BLUE)
@@ -602,32 +650,15 @@ class Game:
         skill_desc = self.font.render("F = Freeze", True, DARK_BLUE)
         self.screen.blit(skill_desc, (SCREEN_WIDTH - 200, 110))
         
+        # 重生提示
+        if self.player.respawn_timer > 0:
+            respawn_text = self.font.render(f"RESPAWNING... {self.player.respawn_timer // 6 + 1}", True, RED)
+            text_rect = respawn_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2))
+            self.screen.blit(respawn_text, text_rect)
+        
         if self.kill_count < 5:
             tutorial = self.font.render(self.tutorial_text, True, BLACK)
             self.screen.blit(tutorial, (SCREEN_WIDTH // 2 - 250, 20))
-        
-        # 游戏结束
-        if self.game_over:
-            overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
-            overlay.set_alpha(128)
-            overlay.fill(BLACK)
-            self.screen.blit(overlay, (0, 0))
-            
-            game_over_text = self.big_font.render("GAME OVER", True, RED)
-            text_rect = game_over_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 - 50))
-            self.screen.blit(game_over_text, text_rect)
-            
-            score_text = self.font.render(f"Final Score: {self.score}", True, WHITE)
-            score_rect = score_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2))
-            self.screen.blit(score_text, score_rect)
-            
-            kills_text = self.font.render(f"Total Kills: {self.kill_count}", True, WHITE)
-            kills_rect = kills_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 + 50))
-            self.screen.blit(kills_text, kills_rect)
-            
-            restart_text = self.font.render("Press R to restart or Q to quit", True, WHITE)
-            restart_rect = restart_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 + 100))
-            self.screen.blit(restart_text, restart_rect)
     
     def run(self):
         while self.running:
@@ -636,20 +667,15 @@ class Game:
                     self.running = False
                 
                 elif event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_j and not self.game_over:
+                    if event.key == pygame.K_j:
                         self.player.attack()
                     
-                    elif event.key == pygame.K_f and not self.game_over:
+                    elif event.key == pygame.K_f:
                         if self.player.use_frostmourne():
-                            frozen = self.frostmourne_aoe()
-                            if frozen > 0:
-                                print(f"Froze {frozen} enemies!")  # 调试信息
+                            self.frostmourne_aoe()
                     
-                    elif event.key == pygame.K_r and self.game_over:
+                    elif event.key == pygame.K_r:
                         self.init_game()
-                    
-                    elif event.key == pygame.K_q and self.game_over:
-                        self.running = False
             
             self.handle_input()
             self.update()

@@ -12,7 +12,7 @@ FPS = 60
 GRAVITY = 0.5
 JUMP_POWER = -10
 GROUND_Y = 500
-WORLD_WIDTH = 5000  # 世界宽度
+WORLD_WIDTH = 5000
 
 # 颜色定义
 BLACK = (0, 0, 0)
@@ -35,34 +35,211 @@ SILVER = (192, 192, 192)
 DARK_GREEN = (0, 100, 0)
 DARK_RED = (139, 0, 0)
 
-class GatlingBullet:
-    def __init__(self, x, y, direction, angle_offset=0, damage=8):
+class ShotgunPellet:
+    def __init__(self, x, y, direction, angle_offset=0, damage=10):
         self.x = x
         self.y = y
         self.direction = direction
-        self.speed = 18
+        self.speed = 22
         self.damage = damage
         self.angle_offset = angle_offset
         
     def update(self):
         self.x += self.direction * self.speed
-        self.y += self.angle_offset * 1.5
+        self.y += self.angle_offset * 2.5
         
     def draw(self, screen, camera_x=0):
         screen_x = self.x - camera_x
-        if self.direction > 0:
-            pygame.draw.line(screen, YELLOW, 
-                           (int(screen_x - 5), int(self.y)),
-                           (int(screen_x + 5), int(self.y)), 3)
-            pygame.draw.circle(screen, ORANGE, (int(screen_x + 3), int(self.y)), 3)
-        else:
-            pygame.draw.line(screen, YELLOW,
-                           (int(screen_x + 5), int(self.y)),
-                           (int(screen_x - 5), int(self.y)), 3)
-            pygame.draw.circle(screen, ORANGE, (int(screen_x - 3), int(self.y)), 3)
+        pygame.draw.circle(screen, YELLOW, (int(screen_x), int(self.y)), 3)
+        pygame.draw.circle(screen, ORANGE, (int(screen_x), int(self.y)), 1)
     
     def get_rect(self):
-        return pygame.Rect(self.x - 5, self.y - 3, 10, 6)
+        return pygame.Rect(self.x - 3, self.y - 3, 6, 6)
+
+class TankBullet:
+    def __init__(self, x, y, direction):
+        self.x = x
+        self.y = y
+        self.direction = direction
+        self.speed = 20
+        self.damage = 100
+        self.size = 14
+        
+    def update(self):
+        self.x += self.direction * self.speed
+        
+    def draw(self, screen, camera_x=0):
+        screen_x = self.x - camera_x
+        pygame.draw.circle(screen, RED, (int(screen_x), int(self.y)), self.size)
+        pygame.draw.circle(screen, ORANGE, (int(screen_x), int(self.y)), self.size - 3)
+        pygame.draw.circle(screen, YELLOW, (int(screen_x), int(self.y)), self.size - 6)
+        pygame.draw.circle(screen, WHITE, (int(screen_x), int(self.y)), self.size - 9)
+        trail_x = self.x - self.direction * 12 - camera_x
+        pygame.draw.circle(screen, ORANGE, (int(trail_x), int(self.y)), self.size - 5)
+        pygame.draw.circle(screen, RED, (int(trail_x), int(self.y)), self.size - 8)
+    
+    def get_rect(self):
+        return pygame.Rect(self.x - self.size, self.y - self.size, self.size * 2, self.size * 2)
+
+class Tank:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.width = 50
+        self.height = 40
+        self.health = 500
+        self.max_health = 500
+        self.vel_x = 0
+        self.speed = 4
+        self.facing_right = True
+        self.shoot_timer = 0
+        self.shoot_delay = 20
+        self.bullets = []
+        self.exhaust_timer = 0
+        self.respawn_timer = 0
+        
+    def update(self, platforms):
+        if self.respawn_timer > 0:
+            self.respawn_timer -= 1
+            if self.respawn_timer <= 0:
+                self.respawn()
+            return
+        
+        self.x += self.vel_x
+        self.x = max(0, min(self.x, WORLD_WIDTH - self.width))
+        
+        if self.y + self.height >= GROUND_Y:
+            self.y = GROUND_Y - self.height
+        
+        for platform in platforms:
+            if (self.x + self.width > platform.x and 
+                self.x < platform.x + platform.width and
+                self.y + self.height > platform.y and
+                self.y + self.height < platform.y + platform.height + 10):
+                self.y = platform.y - self.height
+        
+        if self.shoot_timer > 0:
+            self.shoot_timer -= 1
+        
+        for bullet in self.bullets[:]:
+            bullet.update()
+            if bullet.x < -100 or bullet.x > WORLD_WIDTH + 100:
+                self.bullets.remove(bullet)
+        
+        if self.exhaust_timer > 0:
+            self.exhaust_timer -= 1
+    
+    def move_left(self):
+        self.vel_x = -self.speed
+        self.facing_right = False
+        self.exhaust_timer = 5
+    
+    def move_right(self):
+        self.vel_x = self.speed
+        self.facing_right = True
+        self.exhaust_timer = 5
+    
+    def stop(self):
+        self.vel_x = 0
+    
+    def shoot(self):
+        if self.shoot_timer <= 0 and self.respawn_timer == 0:
+            bullet_x = self.x + self.width if self.facing_right else self.x
+            bullet_y = self.y + self.height // 2
+            direction = 1 if self.facing_right else -1
+            bullet = TankBullet(bullet_x, bullet_y, direction)
+            self.bullets.append(bullet)
+            self.shoot_timer = self.shoot_delay
+            return True
+        return False
+    
+    def take_damage(self, damage, knockback_dir=None):
+        if self.respawn_timer > 0:
+            return False
+        self.health -= damage
+        if self.health <= 0:
+            self.start_respawn()
+            return True
+        return False
+    
+    def start_respawn(self):
+        self.respawn_timer = 180
+        self.vel_x = 0
+        self.bullets.clear()
+    
+    def respawn(self):
+        self.x = 400
+        self.y = GROUND_Y - 40
+        self.health = self.max_health
+        self.vel_x = 0
+        self.facing_right = True
+        self.shoot_timer = 0
+        self.bullets.clear()
+        self.respawn_timer = 0
+    
+    def draw(self, screen, camera_x=0):
+        screen_x = self.x - camera_x
+        if screen_x + self.width < 0 or screen_x > SCREEN_WIDTH:
+            return
+        
+        if self.respawn_timer > 0:
+            if (self.respawn_timer // 10) % 2 == 0:
+                return
+        
+        color = DARK_GREEN if self.health > 100 else ORANGE
+        pygame.draw.rect(screen, color, (screen_x, self.y, self.width, self.height))
+        
+        pygame.draw.rect(screen, DARK_GRAY, (screen_x - 5, self.y + 5, 5, self.height - 10))
+        pygame.draw.rect(screen, DARK_GRAY, (screen_x + self.width, self.y + 5, 5, self.height - 10))
+        
+        turret_x = screen_x + self.width // 2
+        turret_y = self.y - 15
+        pygame.draw.circle(screen, DARK_GREEN, (turret_x, turret_y), 18)
+        
+        if self.facing_right:
+            pygame.draw.rect(screen, DARK_GRAY, (turret_x + 5, turret_y - 3, 30, 6))
+            pygame.draw.circle(screen, RED, (turret_x + 35, turret_y), 5)
+        else:
+            pygame.draw.rect(screen, DARK_GRAY, (turret_x - 35, turret_y - 3, 30, 6))
+            pygame.draw.circle(screen, RED, (turret_x - 35, turret_y), 5)
+        
+        if self.exhaust_timer > 0:
+            exh_x = screen_x - 10 if self.facing_right else screen_x + self.width + 10
+            pygame.draw.circle(screen, GRAY, (exh_x, self.y + self.height - 10), 5)
+            pygame.draw.circle(screen, DARK_GRAY, (exh_x, self.y + self.height - 10), 3)
+        
+        bar_width = self.width
+        bar_height = 8
+        health_percent = self.health / self.max_health
+        pygame.draw.rect(screen, RED, (screen_x, self.y - 12, bar_width, bar_height))
+        pygame.draw.rect(screen, GREEN, (screen_x, self.y - 12, bar_width * health_percent, bar_height))
+        
+        for bullet in self.bullets:
+            bullet.draw(screen, camera_x)
+
+class MuzzleFlash:
+    def __init__(self, x, y, facing_right):
+        self.x = x
+        self.y = y
+        self.facing_right = facing_right
+        self.timer = 5
+        
+    def update(self):
+        self.timer -= 1
+        return self.timer > 0
+    
+    def draw(self, screen, camera_x=0):
+        screen_x = self.x - camera_x
+        if self.timer > 0:
+            flash_size = random.randint(8, 15)
+            if self.facing_right:
+                pygame.draw.circle(screen, ORANGE, (screen_x + 5, self.y), flash_size)
+                pygame.draw.circle(screen, YELLOW, (screen_x + 5, self.y), flash_size - 3)
+                pygame.draw.circle(screen, WHITE, (screen_x + 5, self.y), flash_size - 6)
+            else:
+                pygame.draw.circle(screen, ORANGE, (screen_x - 5, self.y), flash_size)
+                pygame.draw.circle(screen, YELLOW, (screen_x - 5, self.y), flash_size - 3)
+                pygame.draw.circle(screen, WHITE, (screen_x - 5, self.y), flash_size - 6)
 
 class Frostmourne:
     def __init__(self):
@@ -137,11 +314,10 @@ class IceShard:
         ])
 
 class Enemy:
-    """敌人基类"""
     def __init__(self, x, y, enemy_type):
         self.x = x
         self.y = y
-        self.type = enemy_type  # sword, sniper, plane, tank
+        self.type = enemy_type
         self.vel_x = 0
         self.vel_y = 0
         self.speed = 1.5
@@ -160,7 +336,6 @@ class Enemy:
         self.shoot_timer = 0
         self.bullets = []
         
-        # 根据类型设置属性
         if enemy_type == "sword":
             self.color = (200, 100, 100)
             self.speed = 2.5
@@ -182,7 +357,7 @@ class Enemy:
             self.attack_damage = 12
             self.flying = True
             self.y = y - 100
-        else:  # tank
+        else:
             self.color = (150, 150, 50)
             self.speed = 1
             self.health = 120
@@ -192,26 +367,25 @@ class Enemy:
             self.attack_damage = 25
             self.shoot_delay = 45
     
-    def update(self, player, platforms, boss_allies):
+    def update(self, player, platforms, boss_allies, tank=None):
         if self.frozen:
             self.frozen_timer -= 1
             if self.frozen_timer <= 0:
                 self.frozen = False
             return
         
-        # 移动向玩家
-        dx = player.x - self.x
+        target = tank if tank and tank.health > 0 and tank.respawn_timer == 0 else player
+        dx = target.x - self.x
+        
         if abs(dx) > 20:
             self.vel_x = self.speed if dx > 0 else -self.speed
             self.facing_right = dx > 0
         else:
             self.vel_x = 0
         
-        # 重力
         if self.type != "plane":
             self.vel_y += GRAVITY
         else:
-            # 飞机在空中飘浮
             self.vel_y += GRAVITY * 0.3
             if self.y > GROUND_Y - 100:
                 self.vel_y = -3
@@ -219,7 +393,6 @@ class Enemy:
         self.x += self.vel_x
         self.y += self.vel_y
         
-        # 地面碰撞
         if self.type != "plane" and self.y + self.height >= GROUND_Y:
             self.y = GROUND_Y - self.height
             self.vel_y = 0
@@ -227,7 +400,6 @@ class Enemy:
         else:
             self.on_ground = False
         
-        # 平台碰撞
         for platform in platforms:
             if (self.x + self.width > platform.x and 
                 self.x < platform.x + platform.width and
@@ -237,7 +409,6 @@ class Enemy:
                 self.vel_y = 0
                 self.on_ground = True
         
-        # 边界
         self.x = max(0, min(self.x, WORLD_WIDTH - self.width))
         if self.y < 0:
             self.y = 0
@@ -245,7 +416,6 @@ class Enemy:
         if self.y + self.height > SCREEN_HEIGHT:
             self.health = 0
         
-        # 攻击冷却
         if self.attack_cooldown > 0:
             self.attack_cooldown -= 1
         if self.attack_timer > 0:
@@ -253,7 +423,6 @@ class Enemy:
         else:
             self.is_attacking = False
         
-        # 射击（狙击手和坦克）
         if self.type in ["sniper", "tank"]:
             if self.shoot_timer <= 0:
                 if abs(dx) < 300:
@@ -268,19 +437,16 @@ class Enemy:
             else:
                 self.shoot_timer -= 1
         
-        # 近战攻击（大剑）
         if self.type == "sword" and abs(dx) < 50 and self.attack_cooldown <= 0:
             self.is_attacking = True
             self.attack_timer = 10
             self.attack_cooldown = 40
         
-        # 更新子弹
         for bullet in self.bullets[:]:
             bullet.update()
             if bullet.x < -100 or bullet.x > WORLD_WIDTH + 100:
                 self.bullets.remove(bullet)
         
-        # 击退
         if self.knockback_timer > 0:
             self.knockback_timer -= 1
     
@@ -297,10 +463,11 @@ class Enemy:
         self.frozen = True
         self.frozen_timer = duration
     
-    def attack_player(self, player):
+    def attack_target(self, target):
         if self.type == "sword" and self.is_attacking and self.attack_timer == 5:
-            if abs(self.x - player.x) < 60:
-                player.take_damage(self.attack_damage, 1 if player.x < self.x else -1)
+            if abs(self.x - target.x) < 60:
+                if hasattr(target, 'take_damage'):
+                    target.take_damage(self.attack_damage, 1 if target.x < self.x else -1)
                 return True
         return False
     
@@ -313,33 +480,26 @@ class Enemy:
         if self.frozen:
             color = ICE_BLUE
         
-        # 身体
         pygame.draw.rect(screen, color, (screen_x, self.y, self.width, self.height))
         
-        # 头部
         head_x = screen_x + self.width // 2
         head_y = self.y - 15
         pygame.draw.circle(screen, color, (head_x, head_y), 15)
         
-        # 眼睛
         eye_x = head_x + 8 if self.facing_right else head_x - 8
         pygame.draw.circle(screen, BLACK, (eye_x, head_y - 5), 4)
         
-        # 根据类型绘制武器
         if self.type == "sword":
-            # 大剑
             if self.is_attacking:
                 sword_end = (head_x + 60 if self.facing_right else head_x - 60, head_y + 10)
             else:
                 sword_end = (head_x + 40 if self.facing_right else head_x - 40, head_y + 10)
             pygame.draw.line(screen, SILVER, (head_x, head_y + 10), sword_end, 6)
         elif self.type == "sniper":
-            # 狙击枪
             gun_x = head_x + 25 if self.facing_right else head_x - 25
             pygame.draw.line(screen, DARK_GRAY, (head_x, head_y + 15), (gun_x, head_y + 10), 5)
             pygame.draw.rect(screen, DARK_GRAY, (gun_x - 5, head_y + 8, 10, 6))
         elif self.type == "plane":
-            # 飞机
             pygame.draw.polygon(screen, color, [
                 (screen_x, self.y + self.height//2),
                 (screen_x + self.width//2, self.y),
@@ -352,22 +512,48 @@ class Enemy:
                 (screen_x + self.width + 15, self.y + self.height//2 + 5)
             ])
         elif self.type == "tank":
-            # 坦克
             pygame.draw.rect(screen, DARK_GREEN, (screen_x + 5, self.y - 10, self.width - 10, 20))
             pygame.draw.rect(screen, DARK_GRAY, (screen_x + self.width//2 - 10, self.y - 20, 20, 15))
             pygame.draw.line(screen, GRAY, (head_x, self.y - 20), 
                            (head_x + 30 if self.facing_right else head_x - 30, self.y - 15), 5)
         
-        # 血条
         bar_width = self.width
         bar_height = 6
         health_percent = self.health / self.max_health
         pygame.draw.rect(screen, RED, (screen_x, self.y - 10, bar_width, bar_height))
         pygame.draw.rect(screen, GREEN, (screen_x, self.y - 10, bar_width * health_percent, bar_height))
         
-        # 子弹
         for bullet in self.bullets:
             bullet.draw(screen, camera_x)
+
+class GatlingBullet:
+    def __init__(self, x, y, direction, angle_offset=0, damage=8):
+        self.x = x
+        self.y = y
+        self.direction = direction
+        self.speed = 18
+        self.damage = damage
+        self.angle_offset = angle_offset
+        
+    def update(self):
+        self.x += self.direction * self.speed
+        self.y += self.angle_offset * 1.5
+        
+    def draw(self, screen, camera_x=0):
+        screen_x = self.x - camera_x
+        if self.direction > 0:
+            pygame.draw.line(screen, YELLOW, 
+                           (int(screen_x - 5), int(self.y)),
+                           (int(screen_x + 5), int(self.y)), 3)
+            pygame.draw.circle(screen, ORANGE, (int(screen_x + 3), int(self.y)), 3)
+        else:
+            pygame.draw.line(screen, YELLOW,
+                           (int(screen_x + 5), int(self.y)),
+                           (int(screen_x - 5), int(self.y)), 3)
+            pygame.draw.circle(screen, ORANGE, (int(screen_x - 3), int(self.y)), 3)
+    
+    def get_rect(self):
+        return pygame.Rect(self.x - 5, self.y - 3, 10, 6)
 
 class BossAlly:
     def __init__(self, x, y):
@@ -391,7 +577,7 @@ class BossAlly:
         self.is_charging = False
         self.charge_timer = 0
         
-    def update(self, platforms, enemies, player):
+    def update(self, platforms, enemies, player, tank=None):
         self.vel_y += GRAVITY * 0.5
         self.x += self.vel_x
         self.y += self.vel_y
@@ -429,7 +615,6 @@ class BossAlly:
             else:
                 self.vel_x = 0
             
-            # 冲锋
             if abs(dx) < 150 and abs(dx) > 30 and random.randint(0, 80) == 0 and not self.is_charging:
                 self.is_charging = True
                 self.charge_timer = 25
@@ -441,7 +626,6 @@ class BossAlly:
                 else:
                     self.vel_x = 12 if dx > 0 else -12
             
-            # 射击
             if self.shoot_timer <= 0:
                 direction = 1 if dx > 0 else -1
                 bullet = GatlingBullet(
@@ -532,11 +716,15 @@ class StickMan:
         self.collision_damage_timer = 0
         self.gatling_timer = 0
         self.sword_angle = 0
+        self.shotgun_timer = 0
+        self.in_tank = False
         
         if is_player:
             self.frostmourne = Frostmourne()
             self.ice_shards = []
+            self.shotgun_pellets = []
             self.gatling_bullets = []
+            self.muzzle_flashes = []
         
     def update(self, platforms):
         if self.respawn_timer > 0:
@@ -560,31 +748,35 @@ class StickMan:
         if self.gatling_timer > 0:
             self.gatling_timer -= 1
         
-        if self.flying:
-            self.vel_y += GRAVITY * 0.3
-        else:
-            self.vel_y += GRAVITY
+        if self.shotgun_timer > 0:
+            self.shotgun_timer -= 1
         
-        self.x += self.vel_x
-        self.y += self.vel_y
-        
-        if self.y + self.height >= GROUND_Y:
-            self.y = GROUND_Y - self.height
-            self.vel_y = 0
-            self.on_ground = True
-            self.flying = False
-        else:
-            self.on_ground = False
-        
-        for platform in platforms:
-            if (self.x + self.width > platform.x and 
-                self.x < platform.x + platform.width and
-                self.y + self.height > platform.y and
-                self.y + self.height < platform.y + platform.height + 10):
-                self.y = platform.y - self.height
+        if not self.in_tank:
+            if self.flying:
+                self.vel_y += GRAVITY * 0.3
+            else:
+                self.vel_y += GRAVITY
+            
+            self.x += self.vel_x
+            self.y += self.vel_y
+            
+            if self.y + self.height >= GROUND_Y:
+                self.y = GROUND_Y - self.height
                 self.vel_y = 0
                 self.on_ground = True
                 self.flying = False
+            else:
+                self.on_ground = False
+            
+            for platform in platforms:
+                if (self.x + self.width > platform.x and 
+                    self.x < platform.x + platform.width and
+                    self.y + self.height > platform.y and
+                    self.y + self.height < platform.y + platform.height + 10):
+                    self.y = platform.y - self.height
+                    self.vel_y = 0
+                    self.on_ground = True
+                    self.flying = False
         
         self.x = max(0, min(self.x, WORLD_WIDTH - self.width))
         if self.y < 0:
@@ -616,23 +808,32 @@ class StickMan:
             for shard in self.ice_shards[:]:
                 if not shard.update():
                     self.ice_shards.remove(shard)
+            for pellet in self.shotgun_pellets[:]:
+                pellet.update()
+                if pellet.x < -100 or pellet.x > WORLD_WIDTH + 100:
+                    self.shotgun_pellets.remove(pellet)
             for bullet in self.gatling_bullets[:]:
                 bullet.update()
                 if bullet.x < -100 or bullet.x > WORLD_WIDTH + 100:
                     self.gatling_bullets.remove(bullet)
+            for flash in self.muzzle_flashes[:]:
+                if not flash.update():
+                    self.muzzle_flashes.remove(flash)
     
-    def shoot_gatling(self):
-        if self.is_player and self.gatling_timer <= 0:
-            self.gatling_timer = 4
-            spread = random.uniform(-3, 3)
-            if self.facing_right:
-                bullet_x = self.x + self.width + 5
-            else:
-                bullet_x = self.x - 5
-            bullet_y = self.y + self.height // 2
+    def shoot_shotgun(self):
+        if self.is_player and self.shotgun_timer <= 0 and not self.in_tank:
+            self.shotgun_timer = 40
             direction = 1 if self.facing_right else -1
-            bullet = GatlingBullet(bullet_x, bullet_y, direction, spread)
-            self.gatling_bullets.append(bullet)
+            bullet_x = self.x + self.width if self.facing_right else self.x
+            bullet_y = self.y + self.height // 2
+            
+            flash = MuzzleFlash(bullet_x, bullet_y, self.facing_right)
+            self.muzzle_flashes.append(flash)
+            
+            for i in range(-10, 10):
+                angle_offset = i * 3.6
+                pellet = ShotgunPellet(bullet_x, bullet_y, direction, angle_offset, 10)
+                self.shotgun_pellets.append(pellet)
             return True
         return False
     
@@ -658,12 +859,16 @@ class StickMan:
         self.respawn_timer = 0
         self.collision_damage_timer = 0
         self.gatling_timer = 0
+        self.shotgun_timer = 0
+        self.in_tank = False
         if self.is_player:
             self.ice_shards.clear()
+            self.shotgun_pellets.clear()
             self.gatling_bullets.clear()
+            self.muzzle_flashes.clear()
     
     def fly(self):
-        if self.can_fly and self.respawn_timer == 0:
+        if self.can_fly and self.respawn_timer == 0 and not self.in_tank:
             self.flying = True
             self.vel_y = -8
             self.on_ground = False
@@ -672,7 +877,7 @@ class StickMan:
         self.flying = False
     
     def use_frostmourne(self):
-        if self.is_player and self.frostmourne.use():
+        if self.is_player and self.frostmourne.use() and not self.in_tank:
             for _ in range(30):
                 angle = random.uniform(0, 2 * math.pi)
                 speed = random.uniform(2, 8)
@@ -684,13 +889,13 @@ class StickMan:
         return False
     
     def jump(self):
-        if self.on_ground and not self.frozen and self.respawn_timer == 0:
+        if self.on_ground and not self.frozen and self.respawn_timer == 0 and not self.in_tank:
             self.vel_y = JUMP_POWER
             self.on_ground = False
     
     def attack(self):
         if (self.attack_cooldown <= 0 and not self.is_attacking 
-            and not self.frozen and self.respawn_timer == 0):
+            and not self.frozen and self.respawn_timer == 0 and not self.in_tank):
             self.is_attacking = True
             self.attack_timer = 10
             self.attack_cooldown = 30
@@ -715,11 +920,14 @@ class StickMan:
     
     def get_attack_rect(self):
         if self.facing_right:
-            return pygame.Rect(self.x + self.width, self.y + 20, 60, 40)
+            return pygame.Rect(self.x + self.width, self.y + 20, 300, 40)
         else:
-            return pygame.Rect(self.x - 60, self.y + 20, 60, 40)
+            return pygame.Rect(self.x - 300, self.y + 20, 300, 40)
     
     def draw(self, screen, camera_x=0):
+        if self.in_tank:
+            return
+        
         screen_x = self.x - camera_x
         if screen_x + self.width < 0 or screen_x > SCREEN_WIDTH:
             return
@@ -749,18 +957,20 @@ class StickMan:
         if self.is_attacking:
             if self.facing_right:
                 sword_start = (head_x + 25, self.y + 25)
-                sword_end = (head_x + 85, self.y + 15 + math.sin(self.sword_angle * 0.1) * 5)
-                pygame.draw.line(screen, SILVER, sword_start, sword_end, 6)
-                pygame.draw.line(screen, BROWN, (head_x + 20, self.y + 28), (head_x + 25, self.y + 25), 4)
-                pygame.draw.line(screen, GOLD, (head_x + 23, self.y + 22), (head_x + 27, self.y + 28), 3)
-                pygame.draw.circle(screen, SILVER, (head_x + 85, self.y + 15), 4)
+                sword_end = (head_x + 300, self.y + 15 + math.sin(self.sword_angle * 0.05) * 10)
+                pygame.draw.line(screen, SILVER, sword_start, sword_end, 8)
+                pygame.draw.line(screen, BROWN, (head_x + 20, self.y + 28), (head_x + 25, self.y + 25), 5)
+                pygame.draw.line(screen, GOLD, (head_x + 23, self.y + 22), (head_x + 27, self.y + 28), 4)
+                pygame.draw.circle(screen, SILVER, (head_x + 300, self.y + 15), 8)
+                pygame.draw.line(screen, WHITE, sword_start, sword_end, 2)
             else:
                 sword_start = (head_x - 25, self.y + 25)
-                sword_end = (head_x - 85, self.y + 15 + math.sin(self.sword_angle * 0.1) * 5)
-                pygame.draw.line(screen, SILVER, sword_start, sword_end, 6)
-                pygame.draw.line(screen, BROWN, (head_x - 20, self.y + 28), (head_x - 25, self.y + 25), 4)
-                pygame.draw.line(screen, GOLD, (head_x - 23, self.y + 22), (head_x - 27, self.y + 28), 3)
-                pygame.draw.circle(screen, SILVER, (head_x - 85, self.y + 15), 4)
+                sword_end = (head_x - 300, self.y + 15 + math.sin(self.sword_angle * 0.05) * 10)
+                pygame.draw.line(screen, SILVER, sword_start, sword_end, 8)
+                pygame.draw.line(screen, BROWN, (head_x - 20, self.y + 28), (head_x - 25, self.y + 25), 5)
+                pygame.draw.line(screen, GOLD, (head_x - 23, self.y + 22), (head_x - 27, self.y + 28), 4)
+                pygame.draw.circle(screen, SILVER, (head_x - 300, self.y + 15), 8)
+                pygame.draw.line(screen, WHITE, sword_start, sword_end, 2)
         
         color = self.color if self.knockback_timer <= 0 else RED
         if self.frozen:
@@ -778,11 +988,13 @@ class StickMan:
         
         if self.is_player:
             if self.facing_right:
-                pygame.draw.rect(screen, DARK_GRAY, (screen_x + 20, self.y + 15, 15, 8))
-                pygame.draw.circle(screen, GRAY, (screen_x + 35, self.y + 19), 5)
+                pygame.draw.rect(screen, DARK_GRAY, (screen_x + 20, self.y + 28, 25, 8))
+                pygame.draw.rect(screen, BROWN, (screen_x + 30, self.y + 36, 8, 6))
+                pygame.draw.circle(screen, GRAY, (screen_x + 45, self.y + 32), 5)
             else:
-                pygame.draw.rect(screen, DARK_GRAY, (screen_x - 5, self.y + 15, 15, 8))
-                pygame.draw.circle(screen, GRAY, (screen_x - 5, self.y + 19), 5)
+                pygame.draw.rect(screen, DARK_GRAY, (screen_x - 15, self.y + 28, 25, 8))
+                pygame.draw.rect(screen, BROWN, (screen_x - 8, self.y + 36, 8, 6))
+                pygame.draw.circle(screen, GRAY, (screen_x - 15, self.y + 32), 5)
         
         if self.is_player and self.frostmourne.active:
             for i in range(3):
@@ -799,8 +1011,12 @@ class StickMan:
         if self.is_player:
             for shard in self.ice_shards:
                 shard.draw(screen, camera_x)
+            for pellet in self.shotgun_pellets:
+                pellet.draw(screen, camera_x)
             for bullet in self.gatling_bullets:
                 bullet.draw(screen, camera_x)
+            for flash in self.muzzle_flashes:
+                flash.draw(screen, camera_x)
 
 class Platform:
     def __init__(self, x, y, width, height, color=BROWN):
@@ -819,7 +1035,7 @@ class Platform:
 class Game:
     def __init__(self):
         self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-        pygame.display.set_caption("Stickman - Endless Runner")
+        pygame.display.set_caption("Stickman - Tank & Shotgun")
         self.clock = pygame.time.Clock()
         self.running = True
         self.font = pygame.font.Font(None, 36)
@@ -829,6 +1045,7 @@ class Game:
     
     def init_game(self):
         self.player = StickMan(200, GROUND_Y - 60)
+        self.tank = None
         self.boss_allies = []
         self.enemies = []
         self.platforms = []
@@ -838,12 +1055,11 @@ class Game:
         self.kill_count = 0
         self.death_count = 0
         self.spawn_timer = 0
-        self.tutorial_text = "G = NUKE | F = Freeze | SPACE = Fly | J = Sword | HOLD K = Gatling"
+        self.tutorial_text = "K = Shotgun | G = Nuke | F = Freeze | SPACE = Fly | J = Sword | H = Teleport to Tank"
         
         self.shake_timer = 0
         self.frost_effect_timer = 0
         
-        # 创建平台（多个）
         for i in range(0, WORLD_WIDTH, 300):
             self.platforms.append(Platform(i, GROUND_Y, 200, 20, DARK_GRAY))
             if i > 200 and i % 600 == 0:
@@ -851,12 +1067,12 @@ class Game:
             if i > 400 and i % 500 == 0:
                 self.platforms.append(Platform(i + 200, GROUND_Y - 150, 100, 20, BROWN))
         
-        # 初始3个BOSS小弟
+        self.tank = Tank(400, GROUND_Y - 40)
+        
         for i in range(3):
             ally = BossAlly(250 + i * 80, GROUND_Y - 60)
             self.boss_allies.append(ally)
         
-        # 初始敌人
         for i in range(5):
             self.spawn_enemy(300 + i * 400)
     
@@ -885,6 +1101,9 @@ class Game:
             self.boss_allies.remove(ally)
             self.score += 50
         
+        if self.tank and self.tank.health > 0 and self.tank.respawn_timer == 0:
+            self.tank.health = max(0, self.tank.health - 200)
+        
         while len(self.boss_allies) < 3:
             new_ally = BossAlly(self.player.x + random.randint(-100, 100), GROUND_Y - 60)
             self.boss_allies.append(new_ally)
@@ -910,22 +1129,51 @@ class Game:
         if self.player.respawn_timer > 0:
             return
         
-        if keys[pygame.K_LEFT] or keys[pygame.K_a]:
-            self.player.vel_x = -self.player.speed
-            self.player.facing_right = False
-        elif keys[pygame.K_RIGHT] or keys[pygame.K_d]:
-            self.player.vel_x = self.player.speed
-            self.player.facing_right = True
-        else:
-            self.player.vel_x *= 0.8
+        # H键：上下坦克（无距离限制，直接传送）
+        if keys[pygame.K_h]:
+            if self.player.in_tank:
+                # 下车
+                self.player.in_tank = False
+                if self.tank and self.tank.health > 0:
+                    self.player.x = self.tank.x + self.tank.width // 2 - self.player.width // 2
+                    self.player.y = self.tank.y - self.player.height
+            else:
+                # 上车：只要坦克存在且活着
+                if self.tank and self.tank.health > 0 and self.tank.respawn_timer == 0:
+                    self.player.in_tank = True
+                    self.player.x = self.tank.x + self.tank.width // 2 - self.player.width // 2
+                    self.player.y = self.tank.y - self.player.height
+            return
         
-        if keys[pygame.K_SPACE]:
-            self.player.fly()
+        if self.player.in_tank and self.tank and self.tank.health > 0 and self.tank.respawn_timer == 0:
+            # 坦克控制
+            if keys[pygame.K_LEFT] or keys[pygame.K_a]:
+                self.tank.move_left()
+            elif keys[pygame.K_RIGHT] or keys[pygame.K_d]:
+                self.tank.move_right()
+            else:
+                self.tank.stop()
+            
+            if keys[pygame.K_SPACE]:
+                self.tank.shoot()
         else:
-            self.player.stop_fly()
-        
-        if keys[pygame.K_k]:
-            self.player.shoot_gatling()
+            # 人物控制
+            if keys[pygame.K_LEFT] or keys[pygame.K_a]:
+                self.player.vel_x = -self.player.speed
+                self.player.facing_right = False
+            elif keys[pygame.K_RIGHT] or keys[pygame.K_d]:
+                self.player.vel_x = self.player.speed
+                self.player.facing_right = True
+            else:
+                self.player.vel_x *= 0.8
+            
+            if keys[pygame.K_SPACE]:
+                self.player.fly()
+            else:
+                self.player.stop_fly()
+            
+            if keys[pygame.K_k]:
+                self.player.shoot_shotgun()
         
         if keys[pygame.K_g]:
             self.nuclear_strike()
@@ -933,7 +1181,51 @@ class Game:
     def check_collisions(self):
         player_rect = pygame.Rect(self.player.x, self.player.y, self.player.width, self.player.height)
         
-        # 玩家与敌人碰撞
+        if self.tank and self.tank.health > 0 and self.tank.respawn_timer == 0:
+            tank_rect = pygame.Rect(self.tank.x, self.tank.y, self.tank.width, self.tank.height)
+            for enemy in self.enemies[:]:
+                enemy_rect = pygame.Rect(enemy.x, enemy.y, enemy.width, enemy.height)
+                if tank_rect.colliderect(enemy_rect):
+                    enemy.take_damage(20, 1 if enemy.x < self.tank.x else -1)
+                    if enemy.health <= 0:
+                        self.enemies.remove(enemy)
+                        self.score += 100
+                        self.kill_count += 1
+        
+        for enemy in self.enemies:
+            if self.tank and self.tank.health > 0 and self.tank.respawn_timer == 0:
+                enemy.attack_target(self.tank)
+            else:
+                enemy.attack_target(self.player)
+            
+            for bullet in enemy.bullets[:]:
+                bullet_rect = bullet.get_rect()
+                if self.tank and self.tank.health > 0 and self.tank.respawn_timer == 0 and bullet_rect.colliderect(tank_rect):
+                    if self.tank.take_damage(bullet.damage):
+                        if self.player.in_tank:
+                            self.player.in_tank = False
+                    if bullet in enemy.bullets:
+                        enemy.bullets.remove(bullet)
+                elif bullet_rect.colliderect(player_rect):
+                    self.player.take_damage(bullet.damage, 1 if bullet.x < self.player.x else -1)
+                    if bullet in enemy.bullets:
+                        enemy.bullets.remove(bullet)
+        
+        if self.tank and self.tank.health > 0 and self.tank.respawn_timer == 0:
+            for bullet in self.tank.bullets[:]:
+                bullet_rect = bullet.get_rect()
+                for enemy in self.enemies[:]:
+                    enemy_rect = pygame.Rect(enemy.x, enemy.y, enemy.width, enemy.height)
+                    if bullet_rect.colliderect(enemy_rect):
+                        enemy.take_damage(bullet.damage, 1 if enemy.x < bullet.x else -1)
+                        if enemy.health <= 0:
+                            self.enemies.remove(enemy)
+                            self.score += 100
+                            self.kill_count += 1
+                        if bullet in self.tank.bullets:
+                            self.tank.bullets.remove(bullet)
+                        break
+        
         for enemy in self.enemies[:]:
             enemy_rect = pygame.Rect(enemy.x, enemy.y, enemy.width, enemy.height)
             if player_rect.colliderect(enemy_rect):
@@ -941,13 +1233,12 @@ class Game:
                     self.player.health -= 10
                     self.player.collision_damage_timer = 30
         
-        # 玩家近战攻击
         if self.player.is_attacking and self.player.attack_timer == 5:
             attack_rect = self.player.get_attack_rect()
             for enemy in self.enemies[:]:
                 enemy_rect = pygame.Rect(enemy.x, enemy.y, enemy.width, enemy.height)
                 if attack_rect.colliderect(enemy_rect):
-                    enemy.take_damage(40, 1 if enemy.x < self.player.x else -1)
+                    enemy.take_damage(50, 1 if enemy.x < self.player.x else -1)
                     if enemy.health <= 0:
                         self.enemies.remove(enemy)
                         self.score += 100
@@ -955,24 +1246,22 @@ class Game:
             for ally in self.boss_allies[:]:
                 ally_rect = pygame.Rect(ally.x, ally.y, ally.width, ally.height)
                 if attack_rect.colliderect(ally_rect):
-                    ally.take_damage(30, 1 if ally.x < self.player.x else -1)
+                    ally.take_damage(40, 1 if ally.x < self.player.x else -1)
         
-        # 玩家加特林子弹
-        for bullet in self.player.gatling_bullets[:]:
-            bullet_rect = bullet.get_rect()
+        for pellet in self.player.shotgun_pellets[:]:
+            pellet_rect = pellet.get_rect()
             for enemy in self.enemies[:]:
                 enemy_rect = pygame.Rect(enemy.x, enemy.y, enemy.width, enemy.height)
-                if bullet_rect.colliderect(enemy_rect):
-                    enemy.take_damage(bullet.damage, 1 if enemy.x < bullet.x else -1)
+                if pellet_rect.colliderect(enemy_rect):
+                    enemy.take_damage(pellet.damage, 1 if enemy.x < pellet.x else -1)
                     if enemy.health <= 0:
                         self.enemies.remove(enemy)
                         self.score += 100
                         self.kill_count += 1
-                    if bullet in self.player.gatling_bullets:
-                        self.player.gatling_bullets.remove(bullet)
+                    if pellet in self.player.shotgun_pellets:
+                        self.player.shotgun_pellets.remove(pellet)
                     break
         
-        # 冰霜碎片
         for shard in self.player.ice_shards[:]:
             shard_rect = pygame.Rect(shard.x-3, shard.y-3, 6, 6)
             for enemy in self.enemies[:]:
@@ -987,17 +1276,6 @@ class Game:
                         self.player.ice_shards.remove(shard)
                     break
         
-        # 敌人攻击和子弹
-        for enemy in self.enemies:
-            enemy.attack_player(self.player)
-            for bullet in enemy.bullets[:]:
-                bullet_rect = bullet.get_rect()
-                if bullet_rect.colliderect(player_rect):
-                    self.player.take_damage(bullet.damage, 1 if bullet.x < self.player.x else -1)
-                    if bullet in enemy.bullets:
-                        enemy.bullets.remove(bullet)
-        
-        # BOSS小弟子弹
         for ally in self.boss_allies:
             for bullet in ally.bullets[:]:
                 bullet_rect = bullet.get_rect()
@@ -1017,7 +1295,6 @@ class Game:
                             ally.bullets.remove(bullet)
                         break
         
-        # BOSS小弟冲锋伤害
         for ally in self.boss_allies:
             if ally.is_charging:
                 ally_rect = pygame.Rect(ally.x, ally.y, ally.width, ally.height)
@@ -1031,6 +1308,14 @@ class Game:
     def update(self):
         if self.game_over:
             return
+        
+        if self.tank and self.tank.health > 0:
+            self.tank.update(self.platforms)
+            if self.player.in_tank:
+                self.player.x = self.tank.x + self.tank.width // 2 - self.player.width // 2
+                self.player.y = self.tank.y - self.player.height
+        elif self.player.in_tank:
+            self.player.in_tank = False
         
         self.player.update(self.platforms)
         
@@ -1046,27 +1331,27 @@ class Game:
         if self.screen_flash_timer > 0:
             self.screen_flash_timer -= 1
         
-        # 保持3个BOSS小弟
         if len(self.boss_allies) < 3:
             new_ally = BossAlly(self.player.x + random.randint(-100, 100), GROUND_Y - 60)
             self.boss_allies.append(new_ally)
         
         for ally in self.boss_allies:
-            ally.update(self.platforms, self.enemies, self.player)
+            ally.update(self.platforms, self.enemies, self.player, self.tank)
         
         for enemy in self.enemies:
-            enemy.update(self.player, self.platforms, self.boss_allies)
+            enemy.update(self.player, self.platforms, self.boss_allies, self.tank)
         
         self.check_collisions()
         
-        # 生成敌人
         self.spawn_timer += 1
         if self.spawn_timer > 120 and len(self.enemies) < 12:
             self.spawn_timer = 0
             self.spawn_enemy()
         
-        # 相机跟随
-        self.camera_x = self.player.x - SCREEN_WIDTH // 2 + self.player.width // 2
+        if self.player.in_tank and self.tank and self.tank.health > 0:
+            self.camera_x = self.tank.x - SCREEN_WIDTH // 2 + self.tank.width // 2
+        else:
+            self.camera_x = self.player.x - SCREEN_WIDTH // 2 + self.player.width // 2
         self.camera_x = max(0, min(self.camera_x, WORLD_WIDTH - SCREEN_WIDTH))
         
         if self.shake_timer > 0:
@@ -1096,7 +1381,6 @@ class Game:
                 fy = random.randint(0, SCREEN_HEIGHT)
                 pygame.draw.circle(self.screen, WHITE, (fx, fy), random.randint(1, 3))
         
-        # 云朵
         for i in range(5):
             cloud_x = (i * 400 - self.camera_x * 0.3) % (SCREEN_WIDTH + 400) - 200
             pygame.draw.ellipse(self.screen, WHITE, (cloud_x, 50, 80, 50))
@@ -1111,9 +1395,11 @@ class Game:
         for ally in self.boss_allies:
             ally.draw(self.screen, self.camera_x)
         
+        if self.tank and self.tank.health > 0:
+            self.tank.draw(self.screen, self.camera_x)
+        
         self.player.draw(self.screen, self.camera_x)
         
-        # UI
         score_text = self.font.render(f"Score: {self.score}", True, BLACK)
         self.screen.blit(score_text, (10, 10))
         
@@ -1132,19 +1418,38 @@ class Game:
         deaths_text = self.font.render(f"Deaths: {self.death_count}/10", True, RED if self.death_count >= 7 else BLACK)
         self.screen.blit(deaths_text, (10, 210))
         
-        nuke_text = self.font.render("NUKE: G", True, GREEN)
-        self.screen.blit(nuke_text, (SCREEN_WIDTH - 150, 10))
+        if self.tank and self.tank.health > 0:
+            tank_text = self.font.render(f"Tank HP: {self.tank.health}", True, DARK_GREEN)
+            self.screen.blit(tank_text, (10, 250))
+            if self.tank.respawn_timer > 0:
+                respawn_text = self.font.render(f"TANK RESPAWN: {self.tank.respawn_timer // 60 + 1}s", True, ORANGE)
+                self.screen.blit(respawn_text, (10, 290))
+            if self.player.in_tank:
+                in_tank_text = self.font.render("IN TANK (H to exit)", True, GREEN)
+                self.screen.blit(in_tank_text, (SCREEN_WIDTH - 250, 10))
+            else:
+                near_text = self.font.render("H to teleport to tank", True, GREEN)
+                self.screen.blit(near_text, (SCREEN_WIDTH - 250, 10))
         
-        gatling_text = self.font.render("HOLD K", True, DARK_BLUE)
-        self.screen.blit(gatling_text, (SCREEN_WIDTH - 150, 50))
+        shotgun_text = self.font.render("K = SHOTGUN", True, ORANGE)
+        self.screen.blit(shotgun_text, (SCREEN_WIDTH - 250, 50))
+        
+        nuke_text = self.font.render("G = NUKE", True, GREEN)
+        self.screen.blit(nuke_text, (SCREEN_WIDTH - 250, 90))
         
         fly_text = self.font.render("SPACE = FLY", True, DARK_BLUE)
-        self.screen.blit(fly_text, (SCREEN_WIDTH - 200, 90))
+        self.screen.blit(fly_text, (SCREEN_WIDTH - 250, 130))
         
-        self.player.frostmourne.draw_cd_icon(self.screen, SCREEN_WIDTH - 70, 130)
+        sword_text = self.font.render("J = LONG SWORD", True, SILVER)
+        self.screen.blit(sword_text, (SCREEN_WIDTH - 250, 170))
+        
+        tank_shoot_text = self.font.render("IN TANK: SPACE = Cannon (100 dmg)", True, DARK_RED)
+        self.screen.blit(tank_shoot_text, (SCREEN_WIDTH - 350, 210))
+        
+        self.player.frostmourne.draw_cd_icon(self.screen, SCREEN_WIDTH - 70, 250)
         
         skill_desc = self.font.render("F = Freeze", True, DARK_BLUE)
-        self.screen.blit(skill_desc, (SCREEN_WIDTH - 200, 190))
+        self.screen.blit(skill_desc, (SCREEN_WIDTH - 200, 310))
         
         if self.player.respawn_timer > 0:
             respawn_text = self.font.render(f"RESPAWNING... {self.player.respawn_timer // 6 + 1}", True, RED)
@@ -1153,7 +1458,7 @@ class Game:
         
         if self.kill_count < 5:
             tutorial = self.font.render(self.tutorial_text, True, BLACK)
-            self.screen.blit(tutorial, (SCREEN_WIDTH // 2 - 350, 20))
+            self.screen.blit(tutorial, (SCREEN_WIDTH // 2 - 400, 20))
         
         if self.game_over:
             overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))

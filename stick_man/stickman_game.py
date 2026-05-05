@@ -56,6 +56,35 @@ class ShotgunPellet:
     def get_rect(self):
         return pygame.Rect(self.x - 3, self.y - 3, 6, 6)
 
+class GatlingBullet:
+    def __init__(self, x, y, direction, angle_offset=0, damage=8):
+        self.x = x
+        self.y = y
+        self.direction = direction
+        self.speed = 18
+        self.damage = damage
+        self.angle_offset = angle_offset
+        
+    def update(self):
+        self.x += self.direction * self.speed
+        self.y += self.angle_offset * 1.5
+        
+    def draw(self, screen, camera_x=0):
+        screen_x = self.x - camera_x
+        if self.direction > 0:
+            pygame.draw.line(screen, YELLOW, 
+                           (int(screen_x - 5), int(self.y)),
+                           (int(screen_x + 5), int(self.y)), 3)
+            pygame.draw.circle(screen, ORANGE, (int(screen_x + 3), int(self.y)), 3)
+        else:
+            pygame.draw.line(screen, YELLOW,
+                           (int(screen_x + 5), int(self.y)),
+                           (int(screen_x - 5), int(self.y)), 3)
+            pygame.draw.circle(screen, ORANGE, (int(screen_x - 3), int(self.y)), 3)
+    
+    def get_rect(self):
+        return pygame.Rect(self.x - 5, self.y - 3, 10, 6)
+
 class TankBullet:
     def __init__(self, x, y, direction):
         self.x = x
@@ -81,26 +110,92 @@ class TankBullet:
     def get_rect(self):
         return pygame.Rect(self.x - self.size, self.y - self.size, self.size * 2, self.size * 2)
 
-class SniperBullet:
-    """狙击手子弹 - 快速、高伤害"""
-    def __init__(self, x, y, direction, damage=20):
+class TurretGunner:
+    """坦克上的炮手 - 自动加特林扫射"""
+    def __init__(self, x, y):
         self.x = x
         self.y = y
-        self.direction = direction
-        self.speed = 25
-        self.damage = damage
-        self.size = 5
+        self.width = 20
+        self.height = 25
+        self.shoot_timer = 0
+        self.shoot_delay = 4  # 高射速
+        self.bullets = []
+        self.facing_right = True
         
-    def update(self):
-        self.x += self.direction * self.speed
+    def update(self, tank_x, tank_y, tank_facing_right, enemies):
+        # 跟随坦克位置
+        if tank_facing_right:
+            self.x = tank_x + 45
+        else:
+            self.x = tank_x - 5
+        self.y = tank_y - 25
+        self.facing_right = tank_facing_right
         
+        # 寻找最近的敌人
+        target = None
+        min_dist = 500
+        for enemy in enemies:
+            dist = abs(enemy.x - self.x)
+            if dist < min_dist:
+                min_dist = dist
+                target = enemy
+        
+        # 射击
+        if self.shoot_timer <= 0 and target:
+            direction = 1 if target.x > self.x else -1
+            spread = random.uniform(-2, 2)
+            bullet_x = self.x + 10 if direction > 0 else self.x - 5
+            bullet_y = self.y + 12
+            bullet = GatlingBullet(bullet_x, bullet_y, direction, spread, 12)
+            self.bullets.append(bullet)
+            self.shoot_timer = self.shoot_delay
+        else:
+            self.shoot_timer -= 1
+        
+        # 更新子弹
+        for bullet in self.bullets[:]:
+            bullet.update()
+            if bullet.x < -100 or bullet.x > WORLD_WIDTH + 100:
+                self.bullets.remove(bullet)
+    
     def draw(self, screen, camera_x=0):
         screen_x = self.x - camera_x
-        pygame.draw.line(screen, RED, (screen_x - 5, self.y), (screen_x + 5, self.y), 3)
-        pygame.draw.circle(screen, YELLOW, (int(screen_x), int(self.y)), 3)
-    
-    def get_rect(self):
-        return pygame.Rect(self.x - 5, self.y - 3, 10, 6)
+        if screen_x + self.width < 0 or screen_x > SCREEN_WIDTH:
+            return
+        
+        # 炮手身体
+        pygame.draw.circle(screen, (50, 50, 150), (screen_x + 10, self.y + 10), 8)
+        pygame.draw.rect(screen, (50, 50, 150), (screen_x + 5, self.y + 15, 10, 10))
+        
+        # 头盔
+        pygame.draw.rect(screen, DARK_GRAY, (screen_x + 3, self.y + 3, 14, 8))
+        
+        # 加特林枪
+        if self.facing_right:
+            pygame.draw.rect(screen, DARK_GRAY, (screen_x + 15, self.y + 12, 20, 6))
+            pygame.draw.circle(screen, GRAY, (screen_x + 35, self.y + 15), 5)
+            # 旋转枪管效果
+            for i in range(3):
+                offset = i * 2
+                pygame.draw.circle(screen, GRAY, (screen_x + 35 + offset, self.y + 15 + offset % 2), 2)
+        else:
+            pygame.draw.rect(screen, DARK_GRAY, (screen_x - 10, self.y + 12, 20, 6))
+            pygame.draw.circle(screen, GRAY, (screen_x - 10, self.y + 15), 5)
+            for i in range(3):
+                offset = i * 2
+                pygame.draw.circle(screen, GRAY, (screen_x - 10 - offset, self.y + 15 + offset % 2), 2)
+        
+        # 射击火光
+        if self.shoot_timer > 0 and self.shoot_timer < 3:
+            if self.facing_right:
+                pygame.draw.circle(screen, ORANGE, (screen_x + 35, self.y + 15), 6)
+                pygame.draw.circle(screen, YELLOW, (screen_x + 35, self.y + 15), 3)
+            else:
+                pygame.draw.circle(screen, ORANGE, (screen_x - 10, self.y + 15), 6)
+                pygame.draw.circle(screen, YELLOW, (screen_x - 10, self.y + 15), 3)
+        
+        for bullet in self.bullets:
+            bullet.draw(screen, camera_x)
 
 class Tank:
     def __init__(self, x, y):
@@ -120,8 +215,9 @@ class Tank:
         self.respawn_timer = 0
         self.heat_timer = 0
         self.heat_damage_timer = 0
+        self.gunner = TurretGunner(x + 45, y - 25)  # 坦克上的炮手
         
-    def update(self, platforms):
+    def update(self, platforms, enemies):
         if self.respawn_timer > 0:
             self.respawn_timer -= 1
             if self.respawn_timer <= 0:
@@ -152,6 +248,9 @@ class Tank:
         if self.exhaust_timer > 0:
             self.exhaust_timer -= 1
         
+        # 更新炮手
+        self.gunner.update(self.x, self.y, self.facing_right, enemies)
+        
         if self.vel_x != 0 or self.shoot_timer > 0:
             self.heat_timer = min(60, self.heat_timer + 1)
         else:
@@ -176,6 +275,9 @@ class Tank:
             self.heat_damage_timer = 0
             return 30
         return 0
+    
+    def get_gunner_bullets(self):
+        return self.gunner.bullets
     
     def move_left(self):
         self.vel_x = -self.speed
@@ -215,6 +317,7 @@ class Tank:
         self.vel_x = 0
         self.bullets.clear()
         self.heat_timer = 0
+        self.gunner.bullets.clear()
     
     def respawn(self):
         self.x = 400
@@ -226,6 +329,7 @@ class Tank:
         self.bullets.clear()
         self.respawn_timer = 0
         self.heat_timer = 0
+        self.gunner = TurretGunner(self.x + 45, self.y - 25)
     
     def draw(self, screen, camera_x=0):
         screen_x = self.x - camera_x
@@ -279,11 +383,33 @@ class Tank:
         pygame.draw.rect(screen, RED, (screen_x, self.y - 12, bar_width, bar_height))
         pygame.draw.rect(screen, GREEN, (screen_x, self.y - 12, bar_width * health_percent, bar_height))
         
+        # 绘制炮手
+        self.gunner.draw(screen, camera_x)
+        
         for bullet in self.bullets:
             bullet.draw(screen, camera_x)
 
+class SniperBullet:
+    def __init__(self, x, y, direction, damage=20):
+        self.x = x
+        self.y = y
+        self.direction = direction
+        self.speed = 25
+        self.damage = damage
+        self.size = 5
+        
+    def update(self):
+        self.x += self.direction * self.speed
+        
+    def draw(self, screen, camera_x=0):
+        screen_x = self.x - camera_x
+        pygame.draw.line(screen, RED, (screen_x - 5, self.y), (screen_x + 5, self.y), 3)
+        pygame.draw.circle(screen, YELLOW, (int(screen_x), int(self.y)), 3)
+    
+    def get_rect(self):
+        return pygame.Rect(self.x - 5, self.y - 3, 10, 6)
+
 class SniperEnemy:
-    """狙击手敌人 - 远程高伤害"""
     def __init__(self, x, y):
         self.x = x
         self.y = y
@@ -314,9 +440,7 @@ class SniperEnemy:
         
         target = tank if tank and tank.health > 0 and tank.respawn_timer == 0 else player
         dx = target.x - self.x
-        dy = target.y - self.y
         
-        # 保持距离，不靠太近
         if abs(dx) > 150:
             self.vel_x = self.speed if dx > 0 else -self.speed
             self.facing_right = dx > 0
@@ -353,7 +477,6 @@ class SniperEnemy:
         if self.y + self.height > SCREEN_HEIGHT:
             self.health = 0
         
-        # 狙击射击
         if self.shoot_timer <= 0:
             if abs(dx) < 400:
                 direction = 1 if dx > 0 else -1
@@ -406,11 +529,9 @@ class SniperEnemy:
         eye_x = head_x + 8 if self.facing_right else head_x - 8
         pygame.draw.circle(screen, BLACK, (eye_x, head_y - 5), 4)
         
-        # 狙击枪
         gun_x = head_x + 30 if self.facing_right else head_x - 30
         pygame.draw.line(screen, DARK_GRAY, (head_x, head_y + 12), (gun_x, head_y + 5), 5)
         pygame.draw.rect(screen, DARK_GRAY, (gun_x - 5, head_y + 3, 10, 6))
-        # 瞄准镜
         pygame.draw.circle(screen, BLUE, (gun_x - 2, head_y + 5), 4)
         pygame.draw.circle(screen, BLACK, (gun_x - 2, head_y + 5), 2)
         
@@ -419,6 +540,134 @@ class SniperEnemy:
         health_percent = self.health / self.max_health
         pygame.draw.rect(screen, RED, (screen_x, self.y - 10, bar_width, bar_height))
         pygame.draw.rect(screen, GREEN, (screen_x, self.y - 10, bar_width * health_percent, bar_height))
+        
+        for bullet in self.bullets:
+            bullet.draw(screen, camera_x)
+
+class SniperAlly:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.vel_x = 0
+        self.vel_y = 0
+        self.speed = 2.5
+        self.width = 30
+        self.height = 60
+        self.health = 150
+        self.max_health = 150
+        self.facing_right = True
+        self.on_ground = True
+        self.flying = False
+        self.shoot_timer = 0
+        self.shoot_delay = 45
+        self.bullets = []
+        self.color = (50, 150, 50)
+        self.knockback_timer = 0
+        
+    def update(self, platforms, enemies, player, tank=None):
+        self.vel_y += GRAVITY
+        self.x += self.vel_x
+        self.y += self.vel_y
+        
+        if self.y + self.height >= GROUND_Y:
+            self.y = GROUND_Y - self.height
+            self.vel_y = 0
+            self.on_ground = True
+        else:
+            self.on_ground = False
+        
+        for platform in platforms:
+            if (self.x + self.width > platform.x and 
+                self.x < platform.x + platform.width and
+                self.y + self.height > platform.y and
+                self.y + self.height < platform.y + platform.height + 10):
+                self.y = platform.y - self.height
+                self.vel_y = 0
+                self.on_ground = True
+        
+        self.x = max(0, min(self.x, WORLD_WIDTH - self.width))
+        if self.y < 0:
+            self.y = 0
+            self.vel_y = 0
+        if self.y + self.height > SCREEN_HEIGHT:
+            self.health = 0
+        
+        if enemies:
+            nearest = min(enemies, key=lambda e: abs(e.x - self.x))
+            dx = nearest.x - self.x
+            
+            if abs(dx) > 100:
+                self.vel_x = self.speed if dx > 0 else -self.speed
+                self.facing_right = dx > 0
+            else:
+                self.vel_x = 0
+            
+            if self.shoot_timer <= 0:
+                direction = 1 if dx > 0 else -1
+                bullet = SniperBullet(
+                    self.x + self.width if direction > 0 else self.x,
+                    self.y + self.height // 2,
+                    direction, 25
+                )
+                self.bullets.append(bullet)
+                self.shoot_timer = self.shoot_delay
+            else:
+                self.shoot_timer -= 1
+        else:
+            dx = player.x - self.x
+            if abs(dx) > 80:
+                self.vel_x = self.speed if dx > 0 else -self.speed
+                self.facing_right = dx > 0
+            else:
+                self.vel_x = 0
+        
+        if self.knockback_timer > 0:
+            self.knockback_timer -= 1
+        
+        for bullet in self.bullets[:]:
+            bullet.update()
+            if bullet.x < -100 or bullet.x > WORLD_WIDTH + 100:
+                self.bullets.remove(bullet)
+    
+    def take_damage(self, damage, knockback_dir):
+        if self.knockback_timer <= 0:
+            self.health -= damage
+            self.knockback_timer = 20
+            self.vel_x = knockback_dir * 8
+            self.vel_y = -5
+            return True
+        return False
+    
+    def draw(self, screen, camera_x=0):
+        screen_x = self.x - camera_x
+        if screen_x + self.width < 0 or screen_x > SCREEN_WIDTH:
+            return
+        
+        head_x = screen_x + self.width // 2
+        head_y = self.y
+        
+        color = self.color if self.knockback_timer <= 0 else YELLOW
+        
+        pygame.draw.circle(screen, color, (head_x, head_y + 12), 12, 3)
+        pygame.draw.line(screen, color, (head_x, self.y + 20), (head_x, self.y + 50), 3)
+        pygame.draw.line(screen, color, (head_x, self.y + 30), (head_x - 15, self.y + 30), 3)
+        pygame.draw.line(screen, color, (head_x, self.y + 30), (head_x + 15, self.y + 30), 3)
+        pygame.draw.line(screen, color, (head_x, self.y + 50), (head_x - 10, self.y + 60), 3)
+        pygame.draw.line(screen, color, (head_x, self.y + 50), (head_x + 10, self.y + 60), 3)
+        
+        eye_x = head_x + 5 if self.facing_right else head_x - 5
+        pygame.draw.circle(screen, BLACK, (eye_x, head_y + 8), 2)
+        
+        gun_x = head_x + 25 if self.facing_right else head_x - 25
+        pygame.draw.line(screen, DARK_GRAY, (head_x, head_y + 15), (gun_x, head_y + 10), 4)
+        pygame.draw.rect(screen, DARK_GRAY, (gun_x - 5, head_y + 8, 10, 6))
+        pygame.draw.circle(screen, BLUE, (gun_x - 2, head_y + 10), 3)
+        
+        bar_width = self.width
+        bar_height = 6
+        health_percent = self.health / self.max_health
+        pygame.draw.rect(screen, RED, (screen_x, self.y - 15, bar_width, bar_height))
+        pygame.draw.rect(screen, GREEN, (screen_x, self.y - 15, bar_width * health_percent, bar_height))
         
         for bullet in self.bullets:
             bullet.draw(screen, camera_x)
@@ -518,138 +767,6 @@ class IceShard:
             (screen_x, self.y+1),
             (screen_x+2, self.y+2)
         ])
-
-class SniperAlly:
-    """狙击手小弟 - 远程狙击"""
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
-        self.vel_x = 0
-        self.vel_y = 0
-        self.speed = 2.5
-        self.width = 30
-        self.height = 60
-        self.health = 150
-        self.max_health = 150
-        self.facing_right = True
-        self.on_ground = True
-        self.flying = False
-        self.shoot_timer = 0
-        self.shoot_delay = 45
-        self.bullets = []
-        self.color = (50, 150, 50)
-        self.knockback_timer = 0
-        
-    def update(self, platforms, enemies, player, tank=None):
-        self.vel_y += GRAVITY
-        self.x += self.vel_x
-        self.y += self.vel_y
-        
-        if self.y + self.height >= GROUND_Y:
-            self.y = GROUND_Y - self.height
-            self.vel_y = 0
-            self.on_ground = True
-        else:
-            self.on_ground = False
-        
-        for platform in platforms:
-            if (self.x + self.width > platform.x and 
-                self.x < platform.x + platform.width and
-                self.y + self.height > platform.y and
-                self.y + self.height < platform.y + platform.height + 10):
-                self.y = platform.y - self.height
-                self.vel_y = 0
-                self.on_ground = True
-        
-        self.x = max(0, min(self.x, WORLD_WIDTH - self.width))
-        if self.y < 0:
-            self.y = 0
-            self.vel_y = 0
-        if self.y + self.height > SCREEN_HEIGHT:
-            self.health = 0
-        
-        # 攻击最近的敌人
-        if enemies:
-            nearest = min(enemies, key=lambda e: abs(e.x - self.x))
-            dx = nearest.x - self.x
-            
-            if abs(dx) > 100:
-                self.vel_x = self.speed if dx > 0 else -self.speed
-                self.facing_right = dx > 0
-            else:
-                self.vel_x = 0
-            
-            if self.shoot_timer <= 0:
-                direction = 1 if dx > 0 else -1
-                bullet = SniperBullet(
-                    self.x + self.width if direction > 0 else self.x,
-                    self.y + self.height // 2,
-                    direction, 25
-                )
-                self.bullets.append(bullet)
-                self.shoot_timer = self.shoot_delay
-            else:
-                self.shoot_timer -= 1
-        else:
-            # 跟随玩家
-            dx = player.x - self.x
-            if abs(dx) > 80:
-                self.vel_x = self.speed if dx > 0 else -self.speed
-                self.facing_right = dx > 0
-            else:
-                self.vel_x = 0
-        
-        if self.knockback_timer > 0:
-            self.knockback_timer -= 1
-        
-        for bullet in self.bullets[:]:
-            bullet.update()
-            if bullet.x < -100 or bullet.x > WORLD_WIDTH + 100:
-                self.bullets.remove(bullet)
-    
-    def take_damage(self, damage, knockback_dir):
-        if self.knockback_timer <= 0:
-            self.health -= damage
-            self.knockback_timer = 20
-            self.vel_x = knockback_dir * 8
-            self.vel_y = -5
-            return True
-        return False
-    
-    def draw(self, screen, camera_x=0):
-        screen_x = self.x - camera_x
-        if screen_x + self.width < 0 or screen_x > SCREEN_WIDTH:
-            return
-        
-        head_x = screen_x + self.width // 2
-        head_y = self.y
-        
-        color = self.color if self.knockback_timer <= 0 else YELLOW
-        
-        pygame.draw.circle(screen, color, (head_x, head_y + 12), 12, 3)
-        pygame.draw.line(screen, color, (head_x, self.y + 20), (head_x, self.y + 50), 3)
-        pygame.draw.line(screen, color, (head_x, self.y + 30), (head_x - 15, self.y + 30), 3)
-        pygame.draw.line(screen, color, (head_x, self.y + 30), (head_x + 15, self.y + 30), 3)
-        pygame.draw.line(screen, color, (head_x, self.y + 50), (head_x - 10, self.y + 60), 3)
-        pygame.draw.line(screen, color, (head_x, self.y + 50), (head_x + 10, self.y + 60), 3)
-        
-        eye_x = head_x + 5 if self.facing_right else head_x - 5
-        pygame.draw.circle(screen, BLACK, (eye_x, head_y + 8), 2)
-        
-        # 狙击枪
-        gun_x = head_x + 25 if self.facing_right else head_x - 25
-        pygame.draw.line(screen, DARK_GRAY, (head_x, head_y + 15), (gun_x, head_y + 10), 4)
-        pygame.draw.rect(screen, DARK_GRAY, (gun_x - 5, head_y + 8, 10, 6))
-        pygame.draw.circle(screen, BLUE, (gun_x - 2, head_y + 10), 3)
-        
-        bar_width = self.width
-        bar_height = 6
-        health_percent = self.health / self.max_health
-        pygame.draw.rect(screen, RED, (screen_x, self.y - 15, bar_width, bar_height))
-        pygame.draw.rect(screen, GREEN, (screen_x, self.y - 15, bar_width * health_percent, bar_height))
-        
-        for bullet in self.bullets:
-            bullet.draw(screen, camera_x)
 
 class StickMan:
     def __init__(self, x, y, color=BLACK, is_player=True):
@@ -997,7 +1114,7 @@ class Platform:
 class Game:
     def __init__(self):
         self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-        pygame.display.set_caption("Stickman - Sniper Battle")
+        pygame.display.set_caption("Stickman - Tank with Gunner")
         self.clock = pygame.time.Clock()
         self.running = True
         self.font = pygame.font.Font(None, 36)
@@ -1008,8 +1125,8 @@ class Game:
     def init_game(self):
         self.player = StickMan(200, GROUND_Y - 60)
         self.tank = None
-        self.sniper_allies = []  # 狙击手小弟
-        self.sniper_enemies = []  # 狙击手敌人
+        self.sniper_allies = []
+        self.sniper_enemies = []
         self.platforms = []
         self.camera_x = 0
         self.game_over = False
@@ -1140,9 +1257,12 @@ class Game:
     
     def check_collisions(self):
         player_rect = pygame.Rect(self.player.x, self.player.y, self.player.width, self.player.height)
+        tank_rect = None
         
-        # 坦克发热伤害
         if self.tank and self.tank.health > 0 and self.tank.respawn_timer == 0:
+            tank_rect = pygame.Rect(self.tank.x, self.tank.y, self.tank.width, self.tank.height)
+            
+            # 坦克发热伤害
             heat_damage = self.tank.get_heat_damage()
             if heat_damage > 0:
                 tank_center = (self.tank.x + self.tank.width//2, self.tank.y + self.tank.height//2)
@@ -1155,10 +1275,8 @@ class Game:
                             self.sniper_enemies.remove(enemy)
                             self.score += 100
                             self.kill_count += 1
-        
-        # 坦克碾压
-        if self.tank and self.tank.health > 0 and self.tank.respawn_timer == 0:
-            tank_rect = pygame.Rect(self.tank.x, self.tank.y, self.tank.width, self.tank.height)
+            
+            # 坦克碾压
             for enemy in self.sniper_enemies[:]:
                 enemy_rect = pygame.Rect(enemy.x, enemy.y, enemy.width, enemy.height)
                 if tank_rect.colliderect(enemy_rect):
@@ -1172,7 +1290,7 @@ class Game:
         for enemy in self.sniper_enemies:
             for bullet in enemy.bullets[:]:
                 bullet_rect = bullet.get_rect()
-                if self.tank and self.tank.health > 0 and self.tank.respawn_timer == 0 and bullet_rect.colliderect(tank_rect):
+                if tank_rect and bullet_rect.colliderect(tank_rect):
                     if self.tank.take_damage(bullet.damage):
                         if self.player.in_tank:
                             self.player.in_tank = False
@@ -1197,6 +1315,22 @@ class Game:
                             self.kill_count += 1
                         if bullet in self.tank.bullets:
                             self.tank.bullets.remove(bullet)
+                        break
+        
+        # 坦克炮手子弹
+        if self.tank and self.tank.health > 0 and self.tank.respawn_timer == 0:
+            for bullet in self.tank.gunner.bullets[:]:
+                bullet_rect = bullet.get_rect()
+                for enemy in self.sniper_enemies[:]:
+                    enemy_rect = pygame.Rect(enemy.x, enemy.y, enemy.width, enemy.height)
+                    if bullet_rect.colliderect(enemy_rect):
+                        enemy.take_damage(bullet.damage, 1 if enemy.x < bullet.x else -1)
+                        if enemy.health <= 0:
+                            self.sniper_enemies.remove(enemy)
+                            self.score += 100
+                            self.kill_count += 1
+                        if bullet in self.tank.gunner.bullets:
+                            self.tank.gunner.bullets.remove(bullet)
                         break
         
         # 玩家近战攻击
@@ -1265,6 +1399,14 @@ class Game:
                             ally.bullets.remove(bullet)
                         break
         
+        # 玩家与敌人碰撞伤害
+        for enemy in self.sniper_enemies[:]:
+            enemy_rect = pygame.Rect(enemy.x, enemy.y, enemy.width, enemy.height)
+            if player_rect.colliderect(enemy_rect):
+                if self.player.collision_damage_timer <= 0 and self.player.respawn_timer == 0:
+                    self.player.health -= 10
+                    self.player.collision_damage_timer = 30
+        
         self.sniper_allies = [a for a in self.sniper_allies if a.health > 0]
     
     def update(self):
@@ -1272,7 +1414,7 @@ class Game:
             return
         
         if self.tank and self.tank.health > 0:
-            self.tank.update(self.platforms)
+            self.tank.update(self.platforms, self.sniper_enemies)
             if self.player.in_tank:
                 self.player.x = self.tank.x + self.tank.width // 2 - self.player.width // 2
                 self.player.y = self.tank.y - self.player.height

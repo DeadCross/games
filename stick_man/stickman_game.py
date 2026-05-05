@@ -34,8 +34,6 @@ GOLD = (255, 215, 0)
 SILVER = (192, 192, 192)
 DARK_GREEN = (0, 100, 0)
 DARK_RED = (139, 0, 0)
-ZOMBIE_GREEN = (50, 100, 30)
-ZOMBIE_PURPLE = (80, 40, 100)
 
 class ShotgunPellet:
     def __init__(self, x, y, direction, angle_offset=0, damage=10):
@@ -83,6 +81,27 @@ class TankBullet:
     def get_rect(self):
         return pygame.Rect(self.x - self.size, self.y - self.size, self.size * 2, self.size * 2)
 
+class SniperBullet:
+    """狙击手子弹 - 快速、高伤害"""
+    def __init__(self, x, y, direction, damage=20):
+        self.x = x
+        self.y = y
+        self.direction = direction
+        self.speed = 25
+        self.damage = damage
+        self.size = 5
+        
+    def update(self):
+        self.x += self.direction * self.speed
+        
+    def draw(self, screen, camera_x=0):
+        screen_x = self.x - camera_x
+        pygame.draw.line(screen, RED, (screen_x - 5, self.y), (screen_x + 5, self.y), 3)
+        pygame.draw.circle(screen, YELLOW, (int(screen_x), int(self.y)), 3)
+    
+    def get_rect(self):
+        return pygame.Rect(self.x - 5, self.y - 3, 10, 6)
+
 class Tank:
     def __init__(self, x, y):
         self.x = x
@@ -99,8 +118,8 @@ class Tank:
         self.bullets = []
         self.exhaust_timer = 0
         self.respawn_timer = 0
-        self.heat_timer = 0  # 发热计时器
-        self.heat_damage_timer = 0  # 灼烧伤害计时器
+        self.heat_timer = 0
+        self.heat_damage_timer = 0
         
     def update(self, platforms):
         if self.respawn_timer > 0:
@@ -133,20 +152,17 @@ class Tank:
         if self.exhaust_timer > 0:
             self.exhaust_timer -= 1
         
-        # 坦克发热：移动或射击时发热
         if self.vel_x != 0 or self.shoot_timer > 0:
             self.heat_timer = min(60, self.heat_timer + 1)
         else:
             self.heat_timer = max(0, self.heat_timer - 1)
         
-        # 灼烧伤害计时器
         if self.heat_timer > 0:
             self.heat_damage_timer += 1
         else:
             self.heat_damage_timer = 0
     
     def get_heat_level(self):
-        """获取发热等级 0-3"""
         if self.heat_timer > 50:
             return 3
         elif self.heat_timer > 30:
@@ -156,8 +172,7 @@ class Tank:
         return 0
     
     def get_heat_damage(self):
-        """对周围敌人造成的伤害"""
-        if self.heat_damage_timer >= 30:  # 每0.5秒造成一次伤害
+        if self.heat_damage_timer >= 30:
             self.heat_damage_timer = 0
             return 30
         return 0
@@ -221,14 +236,13 @@ class Tank:
             if (self.respawn_timer // 10) % 2 == 0:
                 return
         
-        # 根据发热程度改变颜色
         heat_level = self.get_heat_level()
         if heat_level == 3:
-            color = (255, 50, 0)  # 红热
+            color = (255, 50, 0)
         elif heat_level == 2:
-            color = (255, 100, 0)  # 橙热
+            color = (255, 100, 0)
         elif heat_level == 1:
-            color = (255, 150, 0)  # 黄热
+            color = (255, 150, 0)
         else:
             color = DARK_GREEN
         
@@ -253,7 +267,6 @@ class Tank:
             pygame.draw.circle(screen, GRAY, (exh_x, self.y + self.height - 10), 5)
             pygame.draw.circle(screen, DARK_GRAY, (exh_x, self.y + self.height - 10), 3)
         
-        # 发热粒子效果
         if heat_level > 0:
             for _ in range(heat_level * 2):
                 px = screen_x + random.randint(0, self.width)
@@ -269,38 +282,28 @@ class Tank:
         for bullet in self.bullets:
             bullet.draw(screen, camera_x)
 
-class ZombieEnemy:
-    """丧尸敌人 - 近战高攻速，中毒效果"""
-    def __init__(self, x, y, zombie_type):
+class SniperEnemy:
+    """狙击手敌人 - 远程高伤害"""
+    def __init__(self, x, y):
         self.x = x
         self.y = y
-        self.type = zombie_type  # "normal" 或 "poison"
         self.vel_x = 0
         self.vel_y = 0
-        self.speed = 2.5
-        self.width = 35
-        self.height = 65
-        self.health = 100
-        self.max_health = 100
+        self.speed = 1.5
+        self.width = 30
+        self.height = 60
+        self.health = 60
+        self.max_health = 60
         self.facing_right = False
         self.on_ground = True
         self.frozen = False
         self.frozen_timer = 0
         self.knockback_timer = 0
-        self.attack_cooldown = 0
-        self.is_attacking = False
-        self.attack_timer = 0
-        self.poison_damage_timer = 0
-        
-        if zombie_type == "normal":
-            self.color = ZOMBIE_GREEN
-            self.attack_damage = 15
-            self.attack_speed = 25
-        else:
-            self.color = ZOMBIE_PURPLE
-            self.attack_damage = 10
-            self.attack_speed = 20
-            self.poison_duration = 120
+        self.shoot_timer = 0
+        self.shoot_delay = 60
+        self.bullets = []
+        self.color = (100, 200, 100)
+        self.attack_damage = 25
         
     def update(self, player, platforms, tank=None):
         if self.frozen:
@@ -311,10 +314,15 @@ class ZombieEnemy:
         
         target = tank if tank and tank.health > 0 and tank.respawn_timer == 0 else player
         dx = target.x - self.x
+        dy = target.y - self.y
         
-        if abs(dx) > 10:
+        # 保持距离，不靠太近
+        if abs(dx) > 150:
             self.vel_x = self.speed if dx > 0 else -self.speed
             self.facing_right = dx > 0
+        elif abs(dx) < 80:
+            self.vel_x = -self.speed if dx > 0 else self.speed
+            self.facing_right = dx < 0
         else:
             self.vel_x = 0
         
@@ -345,29 +353,27 @@ class ZombieEnemy:
         if self.y + self.height > SCREEN_HEIGHT:
             self.health = 0
         
-        if self.attack_cooldown > 0:
-            self.attack_cooldown -= 1
-        if self.attack_timer > 0:
-            self.attack_timer -= 1
+        # 狙击射击
+        if self.shoot_timer <= 0:
+            if abs(dx) < 400:
+                direction = 1 if dx > 0 else -1
+                bullet = SniperBullet(
+                    self.x + self.width if direction > 0 else self.x,
+                    self.y + self.height // 2,
+                    direction, self.attack_damage
+                )
+                self.bullets.append(bullet)
+                self.shoot_timer = self.shoot_delay
         else:
-            self.is_attacking = False
+            self.shoot_timer -= 1
         
-        if self.poison_damage_timer > 0:
-            self.poison_damage_timer -= 1
+        for bullet in self.bullets[:]:
+            bullet.update()
+            if bullet.x < -100 or bullet.x > WORLD_WIDTH + 100:
+                self.bullets.remove(bullet)
         
-        if abs(dx) < 50 and self.attack_cooldown <= 0:
-            self.is_attacking = True
-            self.attack_timer = 10
-            self.attack_cooldown = self.attack_speed
-    
-    def attack_target(self, target):
-        if self.is_attacking and self.attack_timer == 5:
-            if abs(self.x - target.x) < 60:
-                target.take_damage(self.attack_damage, 1 if target.x < self.x else -1)
-                if self.type == "poison" and hasattr(target, 'poison_timer'):
-                    target.poison_timer = 120
-                return True
-        return False
+        if self.knockback_timer > 0:
+            self.knockback_timer -= 1
     
     def take_damage(self, damage, knockback_dir):
         if self.knockback_timer <= 0 and not self.frozen:
@@ -391,50 +397,31 @@ class ZombieEnemy:
         if self.frozen:
             color = ICE_BLUE
         
-        # 丧尸身体
         pygame.draw.rect(screen, color, (screen_x, self.y, self.width, self.height))
         
-        # 头部
         head_x = screen_x + self.width // 2
         head_y = self.y - 15
         pygame.draw.circle(screen, color, (head_x, head_y), 15)
         
-        # 眼睛（丧尸特征）
-        eye_x1 = head_x - 8
-        eye_x2 = head_x + 8
-        pygame.draw.circle(screen, RED, (eye_x1, head_y - 5), 4)
-        pygame.draw.circle(screen, RED, (eye_x2, head_y - 5), 4)
-        pygame.draw.circle(screen, BLACK, (eye_x1, head_y - 5), 2)
-        pygame.draw.circle(screen, BLACK, (eye_x2, head_y - 5), 2)
+        eye_x = head_x + 8 if self.facing_right else head_x - 8
+        pygame.draw.circle(screen, BLACK, (eye_x, head_y - 5), 4)
         
-        # 嘴巴
-        pygame.draw.line(screen, DARK_RED, (head_x - 5, head_y + 3), (head_x + 5, head_y + 3), 2)
+        # 狙击枪
+        gun_x = head_x + 30 if self.facing_right else head_x - 30
+        pygame.draw.line(screen, DARK_GRAY, (head_x, head_y + 12), (gun_x, head_y + 5), 5)
+        pygame.draw.rect(screen, DARK_GRAY, (gun_x - 5, head_y + 3, 10, 6))
+        # 瞄准镜
+        pygame.draw.circle(screen, BLUE, (gun_x - 2, head_y + 5), 4)
+        pygame.draw.circle(screen, BLACK, (gun_x - 2, head_y + 5), 2)
         
-        # 丧尸手臂（更长）
-        if self.is_attacking:
-            arm_end = (head_x + 45 if self.facing_right else head_x - 45, self.y + 30)
-        else:
-            arm_end = (head_x + 25 if self.facing_right else head_x - 25, self.y + 30)
-        pygame.draw.line(screen, color, (head_x, self.y + 30), arm_end, 5)
-        
-        # 中毒特效
-        if self.type == "poison" and self.poison_damage_timer > 0:
-            pygame.draw.circle(screen, (150, 0, 150), (head_x, head_y + 10), 20, 2)
-        
-        # 血条
         bar_width = self.width
         bar_height = 6
         health_percent = self.health / self.max_health
         pygame.draw.rect(screen, RED, (screen_x, self.y - 10, bar_width, bar_height))
         pygame.draw.rect(screen, GREEN, (screen_x, self.y - 10, bar_width * health_percent, bar_height))
         
-        # 类型标识
-        font = pygame.font.Font(None, 16)
-        if self.type == "poison":
-            type_text = font.render("POISON", True, (200, 0, 200))
-        else:
-            type_text = font.render("ZOMBIE", True, (50, 200, 50))
-        screen.blit(type_text, (screen_x + 5, self.y - 25))
+        for bullet in self.bullets:
+            bullet.draw(screen, camera_x)
 
 class MuzzleFlash:
     def __init__(self, x, y, facing_right):
@@ -532,272 +519,29 @@ class IceShard:
             (screen_x+2, self.y+2)
         ])
 
-class Enemy:
-    def __init__(self, x, y, enemy_type):
-        self.x = x
-        self.y = y
-        self.type = enemy_type
-        self.vel_x = 0
-        self.vel_y = 0
-        self.speed = 1.5
-        self.width = 35
-        self.height = 65
-        self.health = 50
-        self.max_health = 50
-        self.facing_right = False
-        self.on_ground = True
-        self.frozen = False
-        self.frozen_timer = 0
-        self.knockback_timer = 0
-        self.attack_cooldown = 0
-        self.is_attacking = False
-        self.attack_timer = 0
-        self.shoot_timer = 0
-        self.bullets = []
-        
-        if enemy_type == "sword":
-            self.color = (200, 100, 100)
-            self.speed = 2.5
-            self.health = 80
-            self.max_health = 80
-            self.attack_damage = 20
-        elif enemy_type == "sniper":
-            self.color = (100, 200, 100)
-            self.speed = 1.5
-            self.health = 40
-            self.max_health = 40
-            self.attack_damage = 15
-            self.shoot_delay = 60
-        elif enemy_type == "plane":
-            self.color = (100, 100, 200)
-            self.speed = 3
-            self.health = 60
-            self.max_health = 60
-            self.attack_damage = 12
-            self.flying = True
-            self.y = y - 100
-        else:
-            self.color = (150, 150, 50)
-            self.speed = 1
-            self.health = 120
-            self.max_health = 120
-            self.width = 45
-            self.height = 50
-            self.attack_damage = 25
-            self.shoot_delay = 45
-    
-    def update(self, player, platforms, boss_allies, tank=None):
-        if self.frozen:
-            self.frozen_timer -= 1
-            if self.frozen_timer <= 0:
-                self.frozen = False
-            return
-        
-        target = tank if tank and tank.health > 0 and tank.respawn_timer == 0 else player
-        dx = target.x - self.x
-        
-        if abs(dx) > 20:
-            self.vel_x = self.speed if dx > 0 else -self.speed
-            self.facing_right = dx > 0
-        else:
-            self.vel_x = 0
-        
-        if self.type != "plane":
-            self.vel_y += GRAVITY
-        else:
-            self.vel_y += GRAVITY * 0.3
-            if self.y > GROUND_Y - 100:
-                self.vel_y = -3
-        
-        self.x += self.vel_x
-        self.y += self.vel_y
-        
-        if self.type != "plane" and self.y + self.height >= GROUND_Y:
-            self.y = GROUND_Y - self.height
-            self.vel_y = 0
-            self.on_ground = True
-        else:
-            self.on_ground = False
-        
-        for platform in platforms:
-            if (self.x + self.width > platform.x and 
-                self.x < platform.x + platform.width and
-                self.y + self.height > platform.y and
-                self.y + self.height < platform.y + platform.height + 10):
-                self.y = platform.y - self.height
-                self.vel_y = 0
-                self.on_ground = True
-        
-        self.x = max(0, min(self.x, WORLD_WIDTH - self.width))
-        if self.y < 0:
-            self.y = 0
-            self.vel_y = 0
-        if self.y + self.height > SCREEN_HEIGHT:
-            self.health = 0
-        
-        if self.attack_cooldown > 0:
-            self.attack_cooldown -= 1
-        if self.attack_timer > 0:
-            self.attack_timer -= 1
-        else:
-            self.is_attacking = False
-        
-        if self.type in ["sniper", "tank"]:
-            if self.shoot_timer <= 0:
-                if abs(dx) < 300:
-                    direction = 1 if dx > 0 else -1
-                    bullet = GatlingBullet(
-                        self.x + self.width if direction > 0 else self.x,
-                        self.y + self.height // 2,
-                        direction, random.uniform(-1, 1), self.attack_damage
-                    )
-                    self.bullets.append(bullet)
-                    self.shoot_timer = self.shoot_delay
-            else:
-                self.shoot_timer -= 1
-        
-        if self.type == "sword" and abs(dx) < 50 and self.attack_cooldown <= 0:
-            self.is_attacking = True
-            self.attack_timer = 10
-            self.attack_cooldown = 40
-        
-        for bullet in self.bullets[:]:
-            bullet.update()
-            if bullet.x < -100 or bullet.x > WORLD_WIDTH + 100:
-                self.bullets.remove(bullet)
-        
-        if self.knockback_timer > 0:
-            self.knockback_timer -= 1
-    
-    def take_damage(self, damage, knockback_dir):
-        if self.knockback_timer <= 0 and not self.frozen:
-            self.health -= damage
-            self.knockback_timer = 20
-            self.vel_x = knockback_dir * 8
-            self.vel_y = -5
-            return True
-        return False
-    
-    def freeze(self, duration=60):
-        self.frozen = True
-        self.frozen_timer = duration
-    
-    def attack_target(self, target):
-        if self.type == "sword" and self.is_attacking and self.attack_timer == 5:
-            if abs(self.x - target.x) < 60:
-                if hasattr(target, 'take_damage'):
-                    target.take_damage(self.attack_damage, 1 if target.x < self.x else -1)
-                return True
-        return False
-    
-    def draw(self, screen, camera_x=0):
-        screen_x = self.x - camera_x
-        if screen_x + self.width < 0 or screen_x > SCREEN_WIDTH:
-            return
-        
-        color = self.color if self.knockback_timer <= 0 else ORANGE
-        if self.frozen:
-            color = ICE_BLUE
-        
-        pygame.draw.rect(screen, color, (screen_x, self.y, self.width, self.height))
-        
-        head_x = screen_x + self.width // 2
-        head_y = self.y - 15
-        pygame.draw.circle(screen, color, (head_x, head_y), 15)
-        
-        eye_x = head_x + 8 if self.facing_right else head_x - 8
-        pygame.draw.circle(screen, BLACK, (eye_x, head_y - 5), 4)
-        
-        if self.type == "sword":
-            if self.is_attacking:
-                sword_end = (head_x + 60 if self.facing_right else head_x - 60, head_y + 10)
-            else:
-                sword_end = (head_x + 40 if self.facing_right else head_x - 40, head_y + 10)
-            pygame.draw.line(screen, SILVER, (head_x, head_y + 10), sword_end, 6)
-        elif self.type == "sniper":
-            gun_x = head_x + 25 if self.facing_right else head_x - 25
-            pygame.draw.line(screen, DARK_GRAY, (head_x, head_y + 15), (gun_x, head_y + 10), 5)
-            pygame.draw.rect(screen, DARK_GRAY, (gun_x - 5, head_y + 8, 10, 6))
-        elif self.type == "plane":
-            pygame.draw.polygon(screen, color, [
-                (screen_x, self.y + self.height//2),
-                (screen_x + self.width//2, self.y),
-                (screen_x + self.width, self.y + self.height//2),
-                (screen_x + self.width//2, self.y + self.height)
-            ])
-            pygame.draw.polygon(screen, (200, 0, 0), [
-                (screen_x + self.width, self.y + self.height//2),
-                (screen_x + self.width + 15, self.y + self.height//2 - 5),
-                (screen_x + self.width + 15, self.y + self.height//2 + 5)
-            ])
-        elif self.type == "tank":
-            pygame.draw.rect(screen, DARK_GREEN, (screen_x + 5, self.y - 10, self.width - 10, 20))
-            pygame.draw.rect(screen, DARK_GRAY, (screen_x + self.width//2 - 10, self.y - 20, 20, 15))
-            pygame.draw.line(screen, GRAY, (head_x, self.y - 20), 
-                           (head_x + 30 if self.facing_right else head_x - 30, self.y - 15), 5)
-        
-        bar_width = self.width
-        bar_height = 6
-        health_percent = self.health / self.max_health
-        pygame.draw.rect(screen, RED, (screen_x, self.y - 10, bar_width, bar_height))
-        pygame.draw.rect(screen, GREEN, (screen_x, self.y - 10, bar_width * health_percent, bar_height))
-        
-        for bullet in self.bullets:
-            bullet.draw(screen, camera_x)
-
-class GatlingBullet:
-    def __init__(self, x, y, direction, angle_offset=0, damage=8):
-        self.x = x
-        self.y = y
-        self.direction = direction
-        self.speed = 18
-        self.damage = damage
-        self.angle_offset = angle_offset
-        
-    def update(self):
-        self.x += self.direction * self.speed
-        self.y += self.angle_offset * 1.5
-        
-    def draw(self, screen, camera_x=0):
-        screen_x = self.x - camera_x
-        if self.direction > 0:
-            pygame.draw.line(screen, YELLOW, 
-                           (int(screen_x - 5), int(self.y)),
-                           (int(screen_x + 5), int(self.y)), 3)
-            pygame.draw.circle(screen, ORANGE, (int(screen_x + 3), int(self.y)), 3)
-        else:
-            pygame.draw.line(screen, YELLOW,
-                           (int(screen_x + 5), int(self.y)),
-                           (int(screen_x - 5), int(self.y)), 3)
-            pygame.draw.circle(screen, ORANGE, (int(screen_x - 3), int(self.y)), 3)
-    
-    def get_rect(self):
-        return pygame.Rect(self.x - 5, self.y - 3, 10, 6)
-
-class BossAlly:
+class SniperAlly:
+    """狙击手小弟 - 远程狙击"""
     def __init__(self, x, y):
         self.x = x
         self.y = y
         self.vel_x = 0
         self.vel_y = 0
-        self.speed = 3
-        self.width = 35
-        self.height = 70
-        self.health = 200
-        self.max_health = 200
+        self.speed = 2.5
+        self.width = 30
+        self.height = 60
+        self.health = 150
+        self.max_health = 150
         self.facing_right = True
         self.on_ground = True
         self.flying = False
         self.shoot_timer = 0
-        self.shoot_delay = 20
+        self.shoot_delay = 45
         self.bullets = []
-        self.color = DARK_RED
+        self.color = (50, 150, 50)
         self.knockback_timer = 0
-        self.is_charging = False
-        self.charge_timer = 0
         
     def update(self, platforms, enemies, player, tank=None):
-        self.vel_y += GRAVITY * 0.5
+        self.vel_y += GRAVITY
         self.x += self.vel_x
         self.y += self.vel_y
         
@@ -824,38 +568,36 @@ class BossAlly:
         if self.y + self.height > SCREEN_HEIGHT:
             self.health = 0
         
+        # 攻击最近的敌人
         if enemies:
             nearest = min(enemies, key=lambda e: abs(e.x - self.x))
             dx = nearest.x - self.x
             
-            if abs(dx) > 80:
+            if abs(dx) > 100:
                 self.vel_x = self.speed if dx > 0 else -self.speed
                 self.facing_right = dx > 0
             else:
                 self.vel_x = 0
             
-            if abs(dx) < 150 and abs(dx) > 30 and random.randint(0, 80) == 0 and not self.is_charging:
-                self.is_charging = True
-                self.charge_timer = 25
-            
-            if self.is_charging:
-                self.charge_timer -= 1
-                if self.charge_timer <= 0:
-                    self.is_charging = False
-                else:
-                    self.vel_x = 12 if dx > 0 else -12
-            
             if self.shoot_timer <= 0:
                 direction = 1 if dx > 0 else -1
-                bullet = GatlingBullet(
+                bullet = SniperBullet(
                     self.x + self.width if direction > 0 else self.x,
                     self.y + self.height // 2,
-                    direction, random.uniform(-2, 2), 15
+                    direction, 25
                 )
                 self.bullets.append(bullet)
                 self.shoot_timer = self.shoot_delay
             else:
                 self.shoot_timer -= 1
+        else:
+            # 跟随玩家
+            dx = player.x - self.x
+            if abs(dx) > 80:
+                self.vel_x = self.speed if dx > 0 else -self.speed
+                self.facing_right = dx > 0
+            else:
+                self.vel_x = 0
         
         if self.knockback_timer > 0:
             self.knockback_timer -= 1
@@ -882,22 +624,23 @@ class BossAlly:
         head_x = screen_x + self.width // 2
         head_y = self.y
         
-        color = ORANGE if self.is_charging else self.color
-        if self.knockback_timer > 0:
-            color = YELLOW
+        color = self.color if self.knockback_timer <= 0 else YELLOW
         
-        pygame.draw.circle(screen, color, (head_x, head_y + 12), 14, 3)
-        pygame.draw.line(screen, color, (head_x, self.y + 20), (head_x, self.y + 50), 4)
-        pygame.draw.line(screen, color, (head_x, self.y + 30), (head_x - 18, self.y + 30), 4)
-        pygame.draw.line(screen, color, (head_x, self.y + 30), (head_x + 18, self.y + 30), 4)
-        pygame.draw.line(screen, color, (head_x, self.y + 50), (head_x - 12, self.y + 65), 4)
-        pygame.draw.line(screen, color, (head_x, self.y + 50), (head_x + 12, self.y + 65), 4)
+        pygame.draw.circle(screen, color, (head_x, head_y + 12), 12, 3)
+        pygame.draw.line(screen, color, (head_x, self.y + 20), (head_x, self.y + 50), 3)
+        pygame.draw.line(screen, color, (head_x, self.y + 30), (head_x - 15, self.y + 30), 3)
+        pygame.draw.line(screen, color, (head_x, self.y + 30), (head_x + 15, self.y + 30), 3)
+        pygame.draw.line(screen, color, (head_x, self.y + 50), (head_x - 10, self.y + 60), 3)
+        pygame.draw.line(screen, color, (head_x, self.y + 50), (head_x + 10, self.y + 60), 3)
         
-        eye_x = head_x + 6 if self.facing_right else head_x - 6
-        pygame.draw.circle(screen, RED, (eye_x, head_y + 8), 3)
+        eye_x = head_x + 5 if self.facing_right else head_x - 5
+        pygame.draw.circle(screen, BLACK, (eye_x, head_y + 8), 2)
         
-        pygame.draw.line(screen, DARK_RED, (head_x - 8, head_y - 5), (head_x - 15, head_y - 20), 3)
-        pygame.draw.line(screen, DARK_RED, (head_x + 8, head_y - 5), (head_x + 15, head_y - 20), 3)
+        # 狙击枪
+        gun_x = head_x + 25 if self.facing_right else head_x - 25
+        pygame.draw.line(screen, DARK_GRAY, (head_x, head_y + 15), (gun_x, head_y + 10), 4)
+        pygame.draw.rect(screen, DARK_GRAY, (gun_x - 5, head_y + 8, 10, 6))
+        pygame.draw.circle(screen, BLUE, (gun_x - 2, head_y + 10), 3)
         
         bar_width = self.width
         bar_height = 6
@@ -937,7 +680,6 @@ class StickMan:
         self.sword_angle = 0
         self.shotgun_timer = 0
         self.in_tank = False
-        self.poison_timer = 0  # 中毒计时器
         
         if is_player:
             self.frostmourne = Frostmourne()
@@ -970,12 +712,6 @@ class StickMan:
         
         if self.shotgun_timer > 0:
             self.shotgun_timer -= 1
-        
-        # 中毒伤害
-        if self.poison_timer > 0:
-            self.poison_timer -= 1
-            if self.poison_timer % 30 == 0:  # 每0.5秒掉5血
-                self.health -= 5
         
         if not self.in_tank:
             if self.flying:
@@ -1087,7 +823,6 @@ class StickMan:
         self.gatling_timer = 0
         self.shotgun_timer = 0
         self.in_tank = False
-        self.poison_timer = 0
         if self.is_player:
             self.ice_shards.clear()
             self.shotgun_pellets.clear()
@@ -1162,10 +897,6 @@ class StickMan:
         if self.respawn_timer > 0:
             if (self.respawn_timer // 5) % 2 == 0:
                 return
-        
-        # 中毒特效
-        if self.poison_timer > 0:
-            pygame.draw.circle(screen, (150, 0, 150), (screen_x + self.width//2, self.y + self.height//2), 25, 3)
         
         if self.frozen:
             pygame.draw.rect(screen, ICE_BLUE, (screen_x-2, self.y-2, self.width+4, self.height+4), 3)
@@ -1266,7 +997,7 @@ class Platform:
 class Game:
     def __init__(self):
         self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-        pygame.display.set_caption("Stickman - Tank & Zombies")
+        pygame.display.set_caption("Stickman - Sniper Battle")
         self.clock = pygame.time.Clock()
         self.running = True
         self.font = pygame.font.Font(None, 36)
@@ -1277,9 +1008,8 @@ class Game:
     def init_game(self):
         self.player = StickMan(200, GROUND_Y - 60)
         self.tank = None
-        self.boss_allies = []
-        self.enemies = []
-        self.zombies = []  # 丧尸敌人列表
+        self.sniper_allies = []  # 狙击手小弟
+        self.sniper_enemies = []  # 狙击手敌人
         self.platforms = []
         self.camera_x = 0
         self.game_over = False
@@ -1287,7 +1017,6 @@ class Game:
         self.kill_count = 0
         self.death_count = 0
         self.spawn_timer = 0
-        self.zombie_spawn_timer = 0
         self.tutorial_text = "K = Shotgun | G = Nuke | F = Freeze | SPACE = Fly | J = Sword | H = Enter Tank"
         
         self.shake_timer = 0
@@ -1302,79 +1031,56 @@ class Game:
         
         self.tank = Tank(400, GROUND_Y - 40)
         
-        for i in range(3):
-            ally = BossAlly(250 + i * 80, GROUND_Y - 60)
-            self.boss_allies.append(ally)
+        # 初始8个狙击手小弟
+        for i in range(8):
+            ally = SniperAlly(150 + i * 40, GROUND_Y - 60)
+            self.sniper_allies.append(ally)
         
-        for i in range(3):
-            self.spawn_enemy(300 + i * 400)
-        
-        # 初始生成2个丧尸
-        for i in range(2):
-            self.spawn_zombie(500 + i * 300)
+        # 初始4个狙击手敌人
+        for i in range(4):
+            self.spawn_sniper_enemy(300 + i * 400)
     
-    def spawn_enemy(self, x=None):
+    def spawn_sniper_enemy(self, x=None):
         if x is None:
             x = self.player.x + random.randint(300, 600)
             x = min(x, WORLD_WIDTH - 100)
         else:
             x = min(x, WORLD_WIDTH - 100)
         y = GROUND_Y - 70
-        enemy_type = random.choice(["sword", "sniper", "plane", "tank"])
-        new_enemy = Enemy(x, y, enemy_type)
-        self.enemies.append(new_enemy)
-    
-    def spawn_zombie(self, x=None):
-        if x is None:
-            x = self.player.x + random.randint(400, 800)
-            x = min(x, WORLD_WIDTH - 100)
-        else:
-            x = min(x, WORLD_WIDTH - 100)
-        y = GROUND_Y - 70
-        zombie_type = random.choice(["normal", "poison"])
-        new_zombie = ZombieEnemy(x, y, zombie_type)
-        self.zombies.append(new_zombie)
+        new_enemy = SniperEnemy(x, y)
+        self.sniper_enemies.append(new_enemy)
     
     def nuclear_strike(self):
         self.screen_flash_timer = 8
         self.shake_timer = 15
         
-        for enemy in self.enemies[:]:
+        for enemy in self.sniper_enemies[:]:
             enemy.health = 0
-            self.enemies.remove(enemy)
+            self.sniper_enemies.remove(enemy)
             self.score += 100
+            self.kill_count += 1
         
-        for zombie in self.zombies[:]:
-            zombie.health = 0
-            self.zombies.remove(zombie)
-            self.score += 150
-        
-        for ally in self.boss_allies[:]:
+        for ally in self.sniper_allies[:]:
             ally.health = 0
-            self.boss_allies.remove(ally)
+            self.sniper_allies.remove(ally)
             self.score += 50
         
         if self.tank and self.tank.health > 0 and self.tank.respawn_timer == 0:
             self.tank.health = max(0, self.tank.health - 200)
         
-        while len(self.boss_allies) < 3:
-            new_ally = BossAlly(self.player.x + random.randint(-100, 100), GROUND_Y - 60)
-            self.boss_allies.append(new_ally)
+        while len(self.sniper_allies) < 8:
+            new_ally = SniperAlly(self.player.x + random.randint(-100, 100), GROUND_Y - 60)
+            self.sniper_allies.append(new_ally)
         
         return True
     
     def frostmourne_aoe(self):
-        for enemy in self.enemies[:]:
+        for enemy in self.sniper_enemies[:]:
             if not enemy.frozen:
                 enemy.take_damage(10, 1 if enemy.x < self.player.x else -1)
                 enemy.freeze(90)
         
-        for zombie in self.zombies[:]:
-            if not zombie.frozen:
-                zombie.take_damage(10, 1 if zombie.x < self.player.x else -1)
-                zombie.freeze(90)
-        
-        for ally in self.boss_allies[:]:
+        for ally in self.sniper_allies[:]:
             if not ally.frozen:
                 ally.take_damage(10, 1 if ally.x < self.player.x else -1)
                 ally.freeze(60)
@@ -1435,57 +1141,35 @@ class Game:
     def check_collisions(self):
         player_rect = pygame.Rect(self.player.x, self.player.y, self.player.width, self.player.height)
         
-        # 坦克发热对周围敌人造成伤害
+        # 坦克发热伤害
         if self.tank and self.tank.health > 0 and self.tank.respawn_timer == 0:
             heat_damage = self.tank.get_heat_damage()
             if heat_damage > 0:
                 tank_center = (self.tank.x + self.tank.width//2, self.tank.y + self.tank.height//2)
-                for enemy in self.enemies[:]:
+                for enemy in self.sniper_enemies[:]:
                     enemy_center = (enemy.x + enemy.width//2, enemy.y + enemy.height//2)
                     dist = math.sqrt((tank_center[0] - enemy_center[0])**2 + (tank_center[1] - enemy_center[1])**2)
                     if dist < 80:
                         enemy.take_damage(heat_damage, 1 if enemy.x < self.tank.x else -1)
                         if enemy.health <= 0:
-                            self.enemies.remove(enemy)
+                            self.sniper_enemies.remove(enemy)
                             self.score += 100
                             self.kill_count += 1
-                for zombie in self.zombies[:]:
-                    zombie_center = (zombie.x + zombie.width//2, zombie.y + zombie.height//2)
-                    dist = math.sqrt((tank_center[0] - zombie_center[0])**2 + (tank_center[1] - zombie_center[1])**2)
-                    if dist < 80:
-                        zombie.take_damage(heat_damage, 1 if zombie.x < self.tank.x else -1)
-                        if zombie.health <= 0:
-                            self.zombies.remove(zombie)
-                            self.score += 150
-                            self.kill_count += 1
         
-        # 坦克碾压伤害
+        # 坦克碾压
         if self.tank and self.tank.health > 0 and self.tank.respawn_timer == 0:
             tank_rect = pygame.Rect(self.tank.x, self.tank.y, self.tank.width, self.tank.height)
-            for enemy in self.enemies[:]:
+            for enemy in self.sniper_enemies[:]:
                 enemy_rect = pygame.Rect(enemy.x, enemy.y, enemy.width, enemy.height)
                 if tank_rect.colliderect(enemy_rect):
                     enemy.take_damage(20, 1 if enemy.x < self.tank.x else -1)
                     if enemy.health <= 0:
-                        self.enemies.remove(enemy)
+                        self.sniper_enemies.remove(enemy)
                         self.score += 100
                         self.kill_count += 1
-            for zombie in self.zombies[:]:
-                zombie_rect = pygame.Rect(zombie.x, zombie.y, zombie.width, zombie.height)
-                if tank_rect.colliderect(zombie_rect):
-                    zombie.take_damage(20, 1 if zombie.x < self.tank.x else -1)
-                    if zombie.health <= 0:
-                        self.zombies.remove(zombie)
-                        self.score += 150
-                        self.kill_count += 1
         
-        # 敌人攻击
-        for enemy in self.enemies:
-            if self.tank and self.tank.health > 0 and self.tank.respawn_timer == 0:
-                enemy.attack_target(self.tank)
-            else:
-                enemy.attack_target(self.player)
-            
+        # 狙击手敌人子弹
+        for enemy in self.sniper_enemies:
             for bullet in enemy.bullets[:]:
                 bullet_rect = bullet.get_rect()
                 if self.tank and self.tank.health > 0 and self.tank.respawn_timer == 0 and bullet_rect.colliderect(tank_rect):
@@ -1499,48 +1183,17 @@ class Game:
                     if bullet in enemy.bullets:
                         enemy.bullets.remove(bullet)
         
-        # 丧尸攻击
-        for zombie in self.zombies:
-            zombie.attack_target(self.player)
-        
-        # 玩家与敌人碰撞
-        for enemy in self.enemies[:]:
-            enemy_rect = pygame.Rect(enemy.x, enemy.y, enemy.width, enemy.height)
-            if player_rect.colliderect(enemy_rect):
-                if self.player.collision_damage_timer <= 0 and self.player.respawn_timer == 0:
-                    self.player.health -= 10
-                    self.player.collision_damage_timer = 30
-        
-        # 玩家与丧尸碰撞
-        for zombie in self.zombies[:]:
-            zombie_rect = pygame.Rect(zombie.x, zombie.y, zombie.width, zombie.height)
-            if player_rect.colliderect(zombie_rect):
-                if self.player.collision_damage_timer <= 0 and self.player.respawn_timer == 0:
-                    self.player.health -= 15
-                    self.player.collision_damage_timer = 30
-        
         # 坦克炮弹
         if self.tank and self.tank.health > 0 and self.tank.respawn_timer == 0:
             for bullet in self.tank.bullets[:]:
                 bullet_rect = bullet.get_rect()
-                for enemy in self.enemies[:]:
+                for enemy in self.sniper_enemies[:]:
                     enemy_rect = pygame.Rect(enemy.x, enemy.y, enemy.width, enemy.height)
                     if bullet_rect.colliderect(enemy_rect):
                         enemy.take_damage(bullet.damage, 1 if enemy.x < bullet.x else -1)
                         if enemy.health <= 0:
-                            self.enemies.remove(enemy)
+                            self.sniper_enemies.remove(enemy)
                             self.score += 100
-                            self.kill_count += 1
-                        if bullet in self.tank.bullets:
-                            self.tank.bullets.remove(bullet)
-                        break
-                for zombie in self.zombies[:]:
-                    zombie_rect = pygame.Rect(zombie.x, zombie.y, zombie.width, zombie.height)
-                    if bullet_rect.colliderect(zombie_rect):
-                        zombie.take_damage(bullet.damage, 1 if zombie.x < bullet.x else -1)
-                        if zombie.health <= 0:
-                            self.zombies.remove(zombie)
-                            self.score += 150
                             self.kill_count += 1
                         if bullet in self.tank.bullets:
                             self.tank.bullets.remove(bullet)
@@ -1549,23 +1202,15 @@ class Game:
         # 玩家近战攻击
         if self.player.is_attacking and self.player.attack_timer == 5:
             attack_rect = self.player.get_attack_rect()
-            for enemy in self.enemies[:]:
+            for enemy in self.sniper_enemies[:]:
                 enemy_rect = pygame.Rect(enemy.x, enemy.y, enemy.width, enemy.height)
                 if attack_rect.colliderect(enemy_rect):
                     enemy.take_damage(50, 1 if enemy.x < self.player.x else -1)
                     if enemy.health <= 0:
-                        self.enemies.remove(enemy)
+                        self.sniper_enemies.remove(enemy)
                         self.score += 100
                         self.kill_count += 1
-            for zombie in self.zombies[:]:
-                zombie_rect = pygame.Rect(zombie.x, zombie.y, zombie.width, zombie.height)
-                if attack_rect.colliderect(zombie_rect):
-                    zombie.take_damage(50, 1 if zombie.x < self.player.x else -1)
-                    if zombie.health <= 0:
-                        self.zombies.remove(zombie)
-                        self.score += 150
-                        self.kill_count += 1
-            for ally in self.boss_allies[:]:
+            for ally in self.sniper_allies[:]:
                 ally_rect = pygame.Rect(ally.x, ally.y, ally.width, ally.height)
                 if attack_rect.colliderect(ally_rect):
                     ally.take_damage(40, 1 if ally.x < self.player.x else -1)
@@ -1573,24 +1218,13 @@ class Game:
         # 霰弹枪子弹
         for pellet in self.player.shotgun_pellets[:]:
             pellet_rect = pellet.get_rect()
-            for enemy in self.enemies[:]:
+            for enemy in self.sniper_enemies[:]:
                 enemy_rect = pygame.Rect(enemy.x, enemy.y, enemy.width, enemy.height)
                 if pellet_rect.colliderect(enemy_rect):
                     enemy.take_damage(pellet.damage, 1 if enemy.x < pellet.x else -1)
                     if enemy.health <= 0:
-                        self.enemies.remove(enemy)
+                        self.sniper_enemies.remove(enemy)
                         self.score += 100
-                        self.kill_count += 1
-                    if pellet in self.player.shotgun_pellets:
-                        self.player.shotgun_pellets.remove(pellet)
-                    break
-            for zombie in self.zombies[:]:
-                zombie_rect = pygame.Rect(zombie.x, zombie.y, zombie.width, zombie.height)
-                if pellet_rect.colliderect(zombie_rect):
-                    zombie.take_damage(pellet.damage, 1 if zombie.x < pellet.x else -1)
-                    if zombie.health <= 0:
-                        self.zombies.remove(zombie)
-                        self.score += 150
                         self.kill_count += 1
                     if pellet in self.player.shotgun_pellets:
                         self.player.shotgun_pellets.remove(pellet)
@@ -1599,70 +1233,39 @@ class Game:
         # 冰霜碎片
         for shard in self.player.ice_shards[:]:
             shard_rect = pygame.Rect(shard.x-3, shard.y-3, 6, 6)
-            for enemy in self.enemies[:]:
+            for enemy in self.sniper_enemies[:]:
                 enemy_rect = pygame.Rect(enemy.x, enemy.y, enemy.width, enemy.height)
                 if shard_rect.colliderect(enemy_rect):
                     enemy.take_damage(15, 1 if enemy.x < shard.x else -1)
                     if enemy.health <= 0:
-                        self.enemies.remove(enemy)
+                        self.sniper_enemies.remove(enemy)
                         self.score += 100
                         self.kill_count += 1
                     if shard in self.player.ice_shards:
                         self.player.ice_shards.remove(shard)
                     break
-            for zombie in self.zombies[:]:
-                zombie_rect = pygame.Rect(zombie.x, zombie.y, zombie.width, zombie.height)
-                if shard_rect.colliderect(zombie_rect):
-                    zombie.take_damage(15, 1 if zombie.x < shard.x else -1)
-                    if zombie.health <= 0:
-                        self.zombies.remove(zombie)
-                        self.score += 150
-                        self.kill_count += 1
-                    if shard in self.player.ice_shards:
-                        self.player.ice_shards.remove(shard)
-                    break
         
-        # BOSS小弟子弹
-        for ally in self.boss_allies:
+        # 狙击手小弟子弹
+        for ally in self.sniper_allies:
             for bullet in ally.bullets[:]:
                 bullet_rect = bullet.get_rect()
                 if bullet_rect.colliderect(player_rect):
                     self.player.take_damage(bullet.damage, 1 if bullet.x < self.player.x else -1)
                     if bullet in ally.bullets:
                         ally.bullets.remove(bullet)
-                for enemy in self.enemies[:]:
+                for enemy in self.sniper_enemies[:]:
                     enemy_rect = pygame.Rect(enemy.x, enemy.y, enemy.width, enemy.height)
                     if bullet_rect.colliderect(enemy_rect):
                         enemy.take_damage(bullet.damage, 1 if enemy.x < bullet.x else -1)
                         if enemy.health <= 0:
-                            self.enemies.remove(enemy)
+                            self.sniper_enemies.remove(enemy)
                             self.score += 100
                             self.kill_count += 1
                         if bullet in ally.bullets:
                             ally.bullets.remove(bullet)
                         break
-                for zombie in self.zombies[:]:
-                    zombie_rect = pygame.Rect(zombie.x, zombie.y, zombie.width, zombie.height)
-                    if bullet_rect.colliderect(zombie_rect):
-                        zombie.take_damage(bullet.damage, 1 if zombie.x < bullet.x else -1)
-                        if zombie.health <= 0:
-                            self.zombies.remove(zombie)
-                            self.score += 150
-                            self.kill_count += 1
-                        if bullet in ally.bullets:
-                            ally.bullets.remove(bullet)
-                        break
         
-        # BOSS小弟冲锋
-        for ally in self.boss_allies:
-            if ally.is_charging:
-                ally_rect = pygame.Rect(ally.x, ally.y, ally.width, ally.height)
-                if player_rect.colliderect(ally_rect):
-                    if self.player.collision_damage_timer <= 0:
-                        self.player.health -= 15
-                        self.player.collision_damage_timer = 30
-        
-        self.boss_allies = [a for a in self.boss_allies if a.health > 0]
+        self.sniper_allies = [a for a in self.sniper_allies if a.health > 0]
     
     def update(self):
         if self.game_over:
@@ -1690,32 +1293,24 @@ class Game:
         if self.screen_flash_timer > 0:
             self.screen_flash_timer -= 1
         
-        if len(self.boss_allies) < 3:
-            new_ally = BossAlly(self.player.x + random.randint(-100, 100), GROUND_Y - 60)
-            self.boss_allies.append(new_ally)
+        # 保持8个狙击手小弟
+        if len(self.sniper_allies) < 8:
+            new_ally = SniperAlly(self.player.x + random.randint(-100, 100), GROUND_Y - 60)
+            self.sniper_allies.append(new_ally)
         
-        for ally in self.boss_allies:
-            ally.update(self.platforms, self.enemies + self.zombies, self.player, self.tank)
+        for ally in self.sniper_allies:
+            ally.update(self.platforms, self.sniper_enemies, self.player, self.tank)
         
-        for enemy in self.enemies:
-            enemy.update(self.player, self.platforms, self.boss_allies, self.tank)
-        
-        for zombie in self.zombies:
-            zombie.update(self.player, self.platforms, self.tank)
+        for enemy in self.sniper_enemies:
+            enemy.update(self.player, self.platforms, self.tank)
         
         self.check_collisions()
         
-        # 生成普通敌人
+        # 生成狙击手敌人
         self.spawn_timer += 1
-        if self.spawn_timer > 120 and len(self.enemies) < 12:
+        if self.spawn_timer > 90 and len(self.sniper_enemies) < 10:
             self.spawn_timer = 0
-            self.spawn_enemy()
-        
-        # 生成丧尸
-        self.zombie_spawn_timer += 1
-        if self.zombie_spawn_timer > 180 and len(self.zombies) < 6:
-            self.zombie_spawn_timer = 0
-            self.spawn_zombie()
+            self.spawn_sniper_enemy()
         
         if self.player.in_tank and self.tank and self.tank.health > 0:
             self.camera_x = self.tank.x - SCREEN_WIDTH // 2 + self.tank.width // 2
@@ -1758,13 +1353,10 @@ class Game:
         for platform in self.platforms:
             platform.draw(self.screen, self.camera_x)
         
-        for enemy in self.enemies:
+        for enemy in self.sniper_enemies:
             enemy.draw(self.screen, self.camera_x)
         
-        for zombie in self.zombies:
-            zombie.draw(self.screen, self.camera_x)
-        
-        for ally in self.boss_allies:
+        for ally in self.sniper_allies:
             ally.draw(self.screen, self.camera_x)
         
         if self.tank and self.tank.health > 0:
@@ -1782,28 +1374,25 @@ class Game:
         kills_text = self.font.render(f"Kills: {self.kill_count}", True, BLACK)
         self.screen.blit(kills_text, (10, 90))
         
-        enemies_text = self.font.render(f"Enemies: {len(self.enemies)}", True, BLACK)
+        enemies_text = self.font.render(f"Enemies: {len(self.sniper_enemies)}", True, BLACK)
         self.screen.blit(enemies_text, (10, 130))
         
-        zombies_text = self.font.render(f"Zombies: {len(self.zombies)}", True, (100, 50, 50))
-        self.screen.blit(zombies_text, (10, 170))
-        
-        allies_text = self.font.render(f"Allies: {len(self.boss_allies)}/3", True, DARK_RED)
-        self.screen.blit(allies_text, (10, 210))
+        allies_text = self.font.render(f"Snipers: {len(self.sniper_allies)}/8", True, DARK_GREEN)
+        self.screen.blit(allies_text, (10, 170))
         
         deaths_text = self.font.render(f"Deaths: {self.death_count}/10", True, RED if self.death_count >= 7 else BLACK)
-        self.screen.blit(deaths_text, (10, 250))
+        self.screen.blit(deaths_text, (10, 210))
         
         if self.tank and self.tank.health > 0:
             tank_text = self.font.render(f"Tank HP: {self.tank.health}", True, DARK_GREEN)
-            self.screen.blit(tank_text, (10, 290))
+            self.screen.blit(tank_text, (10, 250))
             heat_level = self.tank.get_heat_level()
             if heat_level > 0:
                 heat_text = self.font.render(f"HEAT: {heat_level}", True, ORANGE)
-                self.screen.blit(heat_text, (10, 330))
+                self.screen.blit(heat_text, (10, 290))
             if self.tank.respawn_timer > 0:
                 respawn_text = self.font.render(f"TANK RESPAWN: {self.tank.respawn_timer // 60 + 1}s", True, ORANGE)
-                self.screen.blit(respawn_text, (10, 370))
+                self.screen.blit(respawn_text, (10, 330))
             if self.player.in_tank:
                 in_tank_text = self.font.render("IN TANK (H to exit)", True, GREEN)
                 self.screen.blit(in_tank_text, (SCREEN_WIDTH - 250, 10))
